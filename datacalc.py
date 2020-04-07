@@ -524,7 +524,7 @@ def plot_spec(Chipnum,KIDlist=None,Pread='min',spec=['cross'],
             if type(axs) is not np.ndarray:
                 axs = np.array([[axs]])
             elif axs.ndim is not 2:
-                axs = axs[:,np.newaxis]
+                axs = axs[np.newaxis,:]
         else:
             axs = ax12
         

@@ -9,7 +9,7 @@ import warnings
 def f(E, kbT):
     with np.errstate(over='raise',under='ignore'):
         try:
-            return 1 / (1 + np.exp(E / kbT))
+            return 1 / (1 + np.exp(E/kbT))
         except FloatingPointError:
             return np.exp(-E/kbT)
 
@@ -34,8 +34,8 @@ def cinduct(hw, D, kbT):
     if hw > 2 * D:
         s1 -= integrate.quad(integrand12, D - hw, -D, args=(hw, D, kbT))[0]
     s2 = integrate.quad(integrand2, np.max(
-        [D - hw, -D]), D, args=(hw, D, kbT))[0]
-    return s1, s2
+        [D - hw, -D]), D,args=(hw, D, kbT))[0]
+    return s1,s2
 
 # Calculation for energy gap D
 def D(kbT, N0, Vsc, kbTD):

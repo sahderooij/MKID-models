@@ -147,8 +147,7 @@ class KID(object):
         Qi = kidcalc.Qi(s1, s2, self.ak, self.lbd0, self.d, D,
                         self.D0, self.kbT)
         hwres = kidcalc.hwres(s2, self.hw0, s20, self.ak,
-                              self.lbd0, self.d, D,
-                              self.D0, self.kbT)
+                              self.lbd0, self.d, D,self.D0, self.kbT)
         return kidcalc.S21(Qi, self.Qc, hwread, dhw, hwres)
 
     def calc_resp(self, Nqp, hwread, s20, D_0, dhw=0):
@@ -178,8 +177,8 @@ class KID(object):
                           self.kbT)
         Q = Qi_0*self.Qc/(Qi_0+self.Qc)
         beta = kidcalc.beta(self.lbd0, self.d, D_0, self.D0, self.kbT)
-        lindA = -1*-self.ak*beta*Q*(s1 - s_0[0])/s2
-        lintheta = -self.ak*beta*Q*(s2 - s_0[1])/s2
+        lindA = self.ak*beta*Q*(s1 - s_0[0])/s_0[1]
+        lintheta = -self.ak*beta*Q*(s2 - s_0[1])/s_0[1]
         return lindA, lintheta
 
     def calc_dNqp(self, hwrad):
@@ -225,8 +224,8 @@ class KID(object):
         dA = np.zeros(len(Nqparr))
         theta = np.zeros(len(Nqparr))
         for i in range(len(Nqparr)):
-            S21[i],dA[i],theta[i] = \
-            self.calc_resp(Nqparr[i],hwread,s20,D_0)
+            dA[i],theta[i] = \
+            self.calc_linresp(Nqparr[i],hwread,D_0)
         dAspl = interpolate.splrep(Nqparr,dA,s=20)
         thetaspl = interpolate.splrep(Nqparr,theta,s=20)
         dAdNqp = interpolate.splev(Nqp_0,dAspl,der=1)
