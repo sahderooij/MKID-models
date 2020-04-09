@@ -51,6 +51,12 @@ def D(kbT, N0, Vsc, kbTD):
         Ddata = np.load("C:\\Users\\Steven\\Google Drive\\AP\\Thesis\\Coding\\Ddata_Al_1_255.npy")
         Dspl = interpolate.splrep(Ddata[0, :], Ddata[1, :], s=0)
         return np.clip(interpolate.splev(kbT, Dspl),0,None)
+    elif (
+        (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 1.565803618633812e-05)
+    ):
+        Ddata = np.load("C:\\Users\\Steven\\Google Drive\\AP\\Thesis\\Coding\\Ddata_Al_12.npy")
+        Dspl = interpolate.splrep(Ddata[0, :], Ddata[1, :], s=0)
+        return np.clip(interpolate.splev(kbT, Dspl),0,None)
     else:
         warnings.warn('This takes long.. \n N0={}\n kbTD={}\n Vsc={}'.format(N0,kbTD,Vsc))
         def integrandD(E, D, kbT, N0, Vsc):

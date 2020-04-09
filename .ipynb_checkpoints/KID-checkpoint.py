@@ -167,16 +167,18 @@ class KID(object):
         return S21, dA, theta
 
     def calc_linresp(self, Nqp, hwread, D_0):
-        kbTeff = kidcalc.kbTeff(Nqp, self.N0, self.V, self.Vsc,
-                                self.kbTD, self.kbTc)
-        D = kidcalc.D(kbTeff, self.N0, self.Vsc, self.kbTD)
-        s1, s2 = kidcalc.cinduct(hwread, D, kbTeff)
         s_0 = kidcalc.cinduct(hwread, D_0, self.kbT)
         Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak,
                           self.lbd0, self.d, D_0, self.D0,
                           self.kbT)
         Q = Qi_0*self.Qc/(Qi_0+self.Qc)
         beta = kidcalc.beta(self.lbd0, self.d, D_0, self.D0, self.kbT)
+        
+        kbTeff = kidcalc.kbTeff(Nqp, self.N0, self.V, self.Vsc,
+                                self.kbTD, self.kbTc)
+        D = kidcalc.D(kbTeff, self.N0, self.Vsc, self.kbTD)
+        s1, s2 = kidcalc.cinduct(hwread, D, kbTeff)
+
         lindA = self.ak*beta*Q*(s1 - s_0[0])/s_0[1]
         lintheta = -self.ak*beta*Q*(s2 - s_0[1])/s_0[1]
         return lindA, lintheta
@@ -363,16 +365,19 @@ class KID(object):
     def print_params(self):
         #Print Latex table for all the parameters
         units = ['-','$\mu eV$', '$\mu eV$', '$\mu eV$','$\mu m^{-3}$',
-                '-','$\mu m$', '$\mu s$','$\mu eV$', '$\mu eV$','$\mu s$',
-                '$\mu s$','$\mu m$','$\mu eV^{-1}\mu m^{-3}$','-']
+                '-','$\mu m$', '$ns$','$\mu eV$', '$meV$','$ns$',
+                '$ns$','$\mu m$','$\mu eV^{-1}\mu m^{-3}$','-']
+        scalefactors = [1,1,1,1,1,1,1,1e3,1,1e-3,1e3,1e3,1,1,1]
         params = ['$Q_c$','$\hbar\omega_0$','$k_BT_0$','$k_BT$','$V$','$\\alpha_k$',
                  '$d$','$\\tau_{esc}$','$k_BT_c$', '$k_bT_D$', '$\\tau_0$', '$\\tau_{pb}$',
                   '$\lambda(0)$', '$N_0$', '$\eta_{pb}$']
         print('\\begin{tabular}{lll}')
         print("{:<12}&{:<8}\t&{}\\\\".format('Parameter','Value','Unit'))
         print('\\hline')
-        for param,value,unit in zip(params,self.__dict__.values(),units):
-            print("{:<12}&{:.3g}\t&{:s}\\\\".format(param,value,unit))
+        for param,value,unit,scalefactor in zip(params,
+                                               self.__dict__.values(),
+                                               units,scalefactors):
+            print("{:<12}&{:.3g}\t&{:s}\\\\".format(param,value*scalefactor,unit))
         print('\\end{tabular}')
 
 ########################################################################

@@ -519,12 +519,8 @@ def plot_spec(Chipnum,KIDlist=None,Pread='min',spec=['cross'],
         if ax12 is None:
             fig,axs = plt.subplots(len(Preadar),len(specs),
                                    figsize=(6*len(specs),4*len(Preadar)),
-                                   sharex=True,sharey=True)
+                                   sharex=True,sharey=True,squeeze=False)
             fig.suptitle('{}, KID{}'.format(Chipnum,KIDnum))
-            if type(axs) is not np.ndarray:
-                axs = np.array([[axs]])
-            elif axs.ndim is not 2:
-                axs = axs[np.newaxis,:]
         else:
             axs = ax12
         
@@ -715,11 +711,11 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
                 clr = color
             
             axs[0].errorbar(Temp[mask],taut[mask],
-                                     yerr = tauterr[mask],fmt = fmt,capsize = 5.,
-                              color=clr)
+                                     yerr = tauterr[mask],fmt = fmt,capsize = 3.,
+                              color=clr,mec='k')
             axs[1].errorbar(Temp[mask],10*np.log10(lvl[mask]),
                                      yerr = 10*np.log10((lvlerr[mask]+lvl[mask])/lvl[mask]),
-                                     fmt = fmt, capsize = 5.,color=clr)
+                                     fmt = fmt, capsize = 3.,color=clr,mec='k')
             if pltthlvl:
                 Ttemp = np.linspace(50,400,100)
                 explvl = interpolate.splev(Ttemp,Respspl)**2
@@ -728,10 +724,10 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
                 explvl /= interpolate.splev(Ttemp,sqrtlvlcompspl)**2
                 thlvlplot, = axs[1].plot(Ttemp,10*np.log10(explvl),color=clr,linestyle='--')
                 axs[1].legend((thlvlplot,),(r'FNL from responsivity',))
-            if pltkaplan:
+            if pltkaplan and Temp[mask].size != 0:
                 T,taukaplan = tau_kaplan(Temp[mask].min(),Temp[mask].max(),
                                          tesc=tesc_,kbTc=86.17*S21data[0,21])
-                kaplanfit, = axs[0].plot(T,taukaplan,color=clr,linestyle='--',linewidth=3.)
+                kaplanfit, = axs[0].plot(T,taukaplan,color=clr,linestyle='-',linewidth=1.)
                 axs[0].legend((kaplanfit,),('Kaplan',))
             if pltthmfnl:
                 try:
@@ -750,28 +746,28 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
                     warnings.warn('Could not make Thermal FNL, {},KID{},-{} dBm,{}'.format(
                     Chipnum,KIDlist[k],Pread,spec))
                     
-        axs[0].set_title('Lifetime')
+#         axs[0].set_title('Lifetime')
 #         axs[0].set_ylim(8e0,4e3)
         axs[0].set_yscale('log')
-        axs[1].set_title('Flat Noise Level')
+#         axs[1].set_title('Flat Noise Level')
 #         axs[1].set_ylim(-160,-110)
         for i in range(2):
             axs[i].set_xlabel('T (mK)')
 #             axs[i].set_xlim(Temp.min()-10,Temp.max()+10)
-        axs[0].set_ylabel(r'$\tau$ (µs)')
+        axs[0].set_ylabel(r'$\tau_{qp}^*$ (µs)')
         if lvlcomp is 'QakV':
-            axs[1].set_ylabel(r'dBc/Hz-20$log_{10}$(Q$\alpha_k$/V)')
+            axs[1].set_ylabel(r'FNL (dBc/Hz-20$\log_{10}$(Q$\alpha_k$/V))')
         elif lvlcomp is 'Resp':
-            axs[1].set_ylabel(r'dBc/Hz-20$log_{10}$($Resp.^2)$')
+            axs[1].set_ylabel(r'FNL (dBc/Hz-20$\log_{10}$(Resp.))')
         elif lvlcomp is 'QaksqrtV':
-            axs[1].set_ylabel(r'dBc/Hz-20$log_{10}(Q\alpha_k/\sqrt{V})$')
+            axs[1].set_ylabel(r'FNL (dBc/Hz-20$\log_{10}(Q\alpha_k/\sqrt{V}))$')
         elif lvlcomp is 'QaksqrtVtesc':
-            axs[1].set_ylabel(r'dBc/Hz-20$log_{10}(Q\alpha_k\sqrt{(1+\tau_{esc}/\tau_{pb})/V})$')
+            axs[1].set_ylabel(r'FNL (dBc/Hz-20$\log_{10}(Q\alpha_k\sqrt{(1+\tau_{esc}/\tau_{pb})/V}))$')
         elif lvlcomp is 'QaksqrtVtescTc':
             axs[1].set_ylabel(
-                r'dBc/Hz-20$log_{10}(Q\alpha_k\sqrt{(1+\tau_{esc}/\tau_{pb})(k_BT_c)^3/(V\Delta^2)})$')
+                r'FNL (dBc/Hz-20$\log_{10}(Q\alpha_k\sqrt{(1+\tau_{esc}/\tau_{pb})(k_BT_c)^3/(V\Delta^2)})$)')
         else:
-            axs[1].set_ylabel(r'dBc/Hz')
+            axs[1].set_ylabel(r'FNL (dBc/Hz)')
     
 def plot_rejspec(Chipnum,KIDnum,sigma,Trange = (0,400),sepT = False, spec='SPR'):
     dfld = get_datafld()
