@@ -4,12 +4,13 @@ import numpy as np
 import scipy.io
 from scipy import integrate
 from scipy.optimize import curve_fit
+from scipy.optimize import minimize_scalar as minisc
 from scipy import interpolate
 import warnings
 import glob
 
 import KID
-from kidcalc import D, beta, cinduct, hwread, hwres, kbTeff, nqp
+from kidcalc import D, beta, cinduct, hwread, hwres, kbTeff, nqp,Vsc
 
 #################################################################
 ##################### GET DATA FUNCTIONS ########################    
@@ -353,7 +354,7 @@ def kbTbeff(S21data,tqpstar,
     Nqp_0 = V * t0 * N0 * kbTc ** 3 / \
         (2 * D0 ** 2 * tqpstar) * 0.5 * (1 + tesc / tpb)
     
-    return kbTeff(Nqp_0, N0, V, Vsc, kbTD, kbTc)
+    return kbTeff(Nqp_0, N0, V, Vsc, kbTD)
     
 def _tesc(
     kbT,
@@ -365,18 +366,15 @@ def _tesc(
     kbTD=37312.0
 ):
     '''Calculates the phonon escape time, based on tqp* via Kaplan. Times are in ns.'''
-    D0 = 1.76 * kbTc
-    def integrand1(E, D):
-        return 1 / np.sqrt(E ** 2 - D ** 2)
-    Vsc = 1 / (integrate.quad(integrand1, D0, kbTD, args=(D0,))[0] * N0)
+    Vsc_ = Vsc(kbTc,N0,kbTD)
     
-    D_ = D(kbT, N0, Vsc, kbTD)
+    D_ = D(kbT, N0, Vsc_, kbTD)
     nqp_ = nqp(kbT, D_, N0)
     return tpb*((4*tqpstar*nqp_*D_**2)/(t0*N0*kbTc**3)-1)
 
-def tesc(Chipnum,KIDnum,
-              minTemp=220,maxTemp=400,taunonkaplan=2e2,taures=1e1,
-              pltfit=False,pltkaplan=False,
+def tesc(Chipnum,KIDnum,Pread='max',
+              minTemp=220,maxTemp=400,taunonkaplan=2e2,taures=1e1,relerrthrs=.2,
+              pltfit=False,pltkaplan=False,reterr=False,
     t0=.44,
     kb=86.17,
     tpb=.28e-3,
@@ -384,9 +382,21 @@ def tesc(Chipnum,KIDnum,
     kbTD=37312.0,
     defaulttesc=5.1e-5):
     
-    Pread = get_grPread(Chipnum,KIDnum).min()
-    kbTc = get_S21data(Chipnum,KIDnum,get_S21Pread(Chipnum,KIDnum)[0])[0,21]*kb
-    S21Pread = np.array(get_S21Pread(Chipnum,KIDnum))
+    if Pread is 'max':
+        Pread = get_grPread(Chipnum,KIDnum).min()
+    elif Pread is 'min':
+        Pread = get_grPread(Chipnum,KIDnum).max()
+    elif Pread is 'med':
+        Preadarr = get_grPread(Chipnum,KIDnum)
+        Pread = Preadarr[np.abs(Preadarr.mean()-Preadarr).argmin()]
+    elif type(Pread) is int:
+        Pread = np.sort(get_grPread(Chipnum,KIDnum))[Pread]
+    else:
+        raise ValueError('{} not a valid Pread value'.format(Pread))
+
+    kbTc = get_S21data(Chipnum,KIDnum,
+                       get_S21Pread(Chipnum,KIDnum)[0])[0,21]*kb
+    
     Temp = get_grTemp(Chipnum,KIDnum,Pread)
     tescar = np.zeros(len(Temp))
     tqpstar = np.zeros(len(Temp))
@@ -398,8 +408,8 @@ def tesc(Chipnum,KIDnum,
         if pltfit:
             plt.title('{} KID{} -{} dBm T={} mK'.format(
                 Chipnum,KIDnum,Pread,Temp[i]))
-        
-        if tqpstarerr[i]/tqpstar[i] > .2 or \
+            
+        if tqpstarerr[i]/tqpstar[i] > relerrthrs or \
         (tqpstar[i] > taunonkaplan or tqpstar[i] < taures) or \
         (Temp[i] < minTemp or Temp[i] > maxTemp):
             tescar[i] = np.nan
@@ -408,6 +418,7 @@ def tesc(Chipnum,KIDnum,
                              t0,tpb,N0,kbTc,kbTD)
     if tescar[~np.isnan(tescar)].size > 0:
         tesc1 = np.mean(tescar[~np.isnan(tescar)])
+        tescerr = np.std(tescar[~np.isnan(tescar)])
     else:
         tesc1 = np.nan
 
@@ -425,24 +436,55 @@ def tesc(Chipnum,KIDnum,
                    Temp[~np.isnan(tqpstar)].max(),tesc=tesc1,kbTc=kbTc)  
         plt.plot(T,taukaplan)
         plt.yscale('log')
+        plt.ylim(None,1e4)
         plt.xlabel('T (mK)')
         plt.ylabel(r'$\tau_{qp}^*$ (µs)')
         plt.legend(['Kaplan','Data', 'Selected Data'])
-    return tesc1
+    if reterr:
+        return tesc1,tescerr
+    else:
+        return tesc1
 
-def get_tescdict(Chipnum):
+def get_tescdict(Chipnum,Pread='max'):
     tescdict = {}
     KIDlist = get_grKIDs(Chipnum)
     for KIDnum in KIDlist:
-        tescdict[KIDnum] = tesc(Chipnum,KIDnum)
+        tescdict[KIDnum] = tesc(Chipnum,KIDnum,Pread=Pread)
     return tescdict
+
+def calc_NqpfromQi(S21data,lbd0=0.092,kb=86.17,N0=1.72e4,kbTD=37312.0):
+    ak_ = ak(S21data)
+    hw = S21data[:, 5]*2*np.pi*6.582e-4*1e-6
+    d = S21data[0, 25]
+    kbTc = S21data[0,21] * kb
+    kbT = S21data[:,1]*kb
+    D0 = 1.76 * kbTc
+    Vsc_ = Vsc(kbTc,N0,kbTD)
+    def minfunc(kbT,s2s1,hw,N0,Vsc_,kbTD):
+        D_ = D(kbT,N0,Vsc_,kbTD)
+        s1,s2 = cinduct(hw, D_, kbT)
+        return np.abs(s2s1-s2/s1)
+    Nqp = np.zeros(len(kbT))
+    for i in range(len(kbT)):
+        D_0 = D(kbT[i],N0,Vsc_,kbTD)
+        beta_ = beta(lbd0, d, D_0, D0, kbT[i])
+        s2s1 = S21data[i,4]*(ak_*beta_)/2
+        res = minisc(minfunc,
+                     args=(s2s1,hw[i],N0,Vsc_,kbTD),
+                     bounds = (0,kbTc),
+                     method='bounded')
+        kbTeff = res.x
+        D_ = D(kbTeff,N0,Vsc_,kbTD)
+        Nqp[i] = S21data[0,14]*nqp(kbTeff,D_,N0)
+    return kbT/kb,Nqp
+                   
         
 
 #################################################################
 #################### INITIALIZATION FUNCTIONS ###################    
 #################################################################
 
-def init_KID(Chipnum,KIDnum,Pread,Tbath,Teffmethod = 'GR',wvl = None,traps = False,
+def init_KID(Chipnum,KIDnum,Pread,Tbath,Teffmethod = 'GR',wvl = None,S21 = False,
                 t0=.44,
                 kb=86.17,
                 tpb=.28e-3,
@@ -473,15 +515,18 @@ def init_KID(Chipnum,KIDnum,Pread,Tbath,Teffmethod = 'GR',wvl = None,traps = Fal
             taut[i] = tau(freq,SPR)[0]
         tauspl = interpolate.splrep(Temp[~np.isnan(taut)],taut[~np.isnan(taut)])
         tau1 = interpolate.splev(Tbath,tauspl)
-    if Teffmethod is 'peak':
+        kbT = kbTbeff(S21data,tau1,t0,kb,tpb,N0,kbTD,tesc1)
+    elif Teffmethod is 'peak':
         peakdata_ph,peakdata_amp = get_peakdata(Chipnum,KIDnum,Pread,Tbath,wvl)
         tau1 = tau_peak(peakdata_ph)
-
-    kbT = kbTbeff(S21data,tau1,t0,kb,tpb,N0,kbTD,tesc1)
-        
-    if traps:
-        return KID.trKID(
-            Qc=Qc, hw0=hw0, kbT0=kbT0, kbT=kbT, V=V, ak=ak1, d=d, kbTc = kbTc,tesc = tesc1)
+        kbT = kbTbeff(S21data,tau1,t0,kb,tpb,N0,kbTD,tesc1)
+    elif Teffmethod is 'Tbath':
+        kbT = Tbath*1e-3*kb
+    
+    if S21:
+        return KID.S21KID(S21data,
+            Qc=Qc,hw0=hw0,kbT0=kbT0,kbT=kbT,V=V,
+                          ak=ak1,d=d,kbTc=kbTc,tesc=tesc1)
     else:
         return KID.KID(
             Qc=Qc, hw0=hw0, kbT0=kbT0, kbT=kbT, V=V, ak=ak1, d=d, kbTc = kbTc,tesc = tesc1)
@@ -550,9 +595,12 @@ def plot_spec(Chipnum,KIDlist=None,Pread='min',spec=['cross'],
 def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
                 lvlcomp='',delampNoise=True,del1fNoise=True,relerrthrs=.3,
                 pltKIDsep=True,pltthlvl=False,pltkaplan=False,pltthmfnl=False,
-                ax12=None,color='Pread',fmt='-o',defaulttesc=.14e-3,showfit=False):
+                ax12=None,color='Pread',fmt='-o',
+                defaulttesc=.14e-3,tescPread='max',tescpltkaplan=False,
+                showfit=False):
     def _make_fig(**kwargs):
-        fig, axs = plt.subplots(1,2,figsize = (12,4))
+        fig, axs = plt.subplots(1,2,figsize = (6.2,2.1))
+        plt.rcParams.update({'font.size':7})
         if color is 'Pread':
             cmap = matplotlib.cm.get_cmap('plasma')
             norm = matplotlib.colors.Normalize(-1.1*Preadar.max(),-.9*Preadar.min())
@@ -563,13 +611,14 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
             norm = matplotlib.colors.Normalize(np.array(Pintdict[KIDlist[k]]).min()*1.1,
                                                np.array(Pintdict[KIDlist[k]]).max()*.9)
             clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
-            clb.ax.set_title(r'$P_{int}$')
+            clb.ax.set_title(r'$P_{int}$ (dBm)')
         elif color is 'V':
             cmap = matplotlib.cm.get_cmap('cividis')
-            norm = matplotlib.colors.Normalize(np.array(list(Vdict.values())).min(),
-                                               np.array(list(Vdict.values())).max())
+            norm = matplotlib.colors.Normalize(
+                np.array(list(Vdict.values())).min()/.04/.6,
+                np.array(list(Vdict.values())).max()/.04/.6)
             clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
-            clb.ax.set_title(r'$V (µm^3)$')
+            clb.ax.set_title(r'Al l. (µm)')
         elif color is 'KIDnum':
             cmap = matplotlib.cm.get_cmap('gist_rainbow')
             norm = matplotlib.colors.Normalize(np.array(KIDlist).min(),
@@ -612,7 +661,7 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
                                 Preadarr[np.abs(Preadarr.mean()-Preadarr).argmin()],
                                 get_grPread(Chipnum,KIDlist[k]).min()])
         elif pltPread is 'all':
-            Preadar = get_grPread(Chipnum,KIDlist[k])
+            Preadar = get_grPread(Chipnum,KIDlist[k])[::-1]
         elif type(pltPread) is np.ndarray:
             Preadar = pltPread
         else:
@@ -620,12 +669,15 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
             
         if pltKIDsep and ax12 is None:
             fig,axs,cmap,norm = _make_fig(Preadar=Preadar)
-            fig.suptitle('KID{}, {}'.format(KIDlist[k],spec))
+            if len(KIDlist) > 1:
+                fig.suptitle('KID{}, {}'.format(KIDlist[k],spec))
         elif pltKIDsep:
             axs=ax12
 
         if pltthlvl or 'tesc' in lvlcomp or pltkaplan:
-            tesc_ = tesc(Chipnum,KIDlist[k],defaulttesc=defaulttesc)
+            tesc_ = tesc(Chipnum,KIDlist[k],
+                         defaulttesc=defaulttesc,
+                         relerrthrs=relerrthrs,Pread=tescPread,pltkaplan=tescpltkaplan)
     
         for Pread in Preadar:
             S21Pread = np.array(get_S21Pread(Chipnum,KIDlist[k]))
@@ -660,14 +712,30 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
             elif lvlcomp is 'QaksqrtVtescTc':
                 sqrtlvlcompspl = interpolate.splrep(
                     S21data[:,1]*1e3,
-                    S21data[:,2]*akin/np.sqqrt(V*\
+                    S21data[:,2]*akin/np.sqrt(V*\
                                                (1+tesc_/.28e-3)*\
                                             (86.17*S21data[0,21])**3/\
                                                (S21data[0,15]/1.6e-19*1e6)**2),s=0)
             elif lvlcomp is 'Resp':            
                 sqrtlvlcompspl = Respspl
+            elif lvlcomp is 'RespV':            
+                sqrtlvlcompspl = interpolate.splrep(
+                    S21data[:,1]*1e3,
+                    interpolate.splev(S21data[:,1]*1e3,
+                                      Respspl)*np.sqrt(V),s=0)
+            elif lvlcomp is 'RespVtescTc':   
+                kbTc = 86.17*S21data[0,21]
+                Vsc_ = Vsc(kbTc,1.72e4,37312.0)
+                sqrtlvlcompspl = interpolate.splrep(
+                    S21data[:,1]*1e3,
+                    interpolate.splev(S21data[:,1]*1e3,
+                                      Respspl)*\
+                    np.sqrt(V*(1+tesc_/.28e-3)*\
+                            (kbTc)**3/\
+                            (D(86.17*S21data[:,1],1.72e4,Vsc_,37312.))**2),s=0)
             elif lvlcomp is '':
-                sqrtlvlcompspl = interpolate.splrep(S21data[:,1]*1e3,np.ones(len(S21data[:,1])))
+                sqrtlvlcompspl = interpolate.splrep(
+                    S21data[:,1]*1e3,np.ones(len(S21data[:,1])))
             else:
                 raise ValueError('{} is an invalid compensation method'.format(
                     lvlcomp))
@@ -689,8 +757,6 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
                 if showfit:
                     plt.title('{}, KID{}, -{} dBm, T={}, {},\n relerr={}'.format(
                         Chipnum,KIDlist[k],Pread,Temp[i],spec,tauterr[i]/taut[i]))
-                    
-                Q = interpolate.splev(Temp[i],Qspl)
                                 
                 lvl[i] = lvl[i]/interpolate.splev(Temp[i],sqrtlvlcompspl)**2
                 lvlerr[i] = lvlerr[i]/interpolate.splev(Temp[i],sqrtlvlcompspl)**2
@@ -704,7 +770,7 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
             elif color is 'Pint':
                 clr = cmap(norm(Pint))
             elif color is 'V':
-                clr = cmap(norm(Vdict[KIDlist[k]]))
+                clr = cmap(norm(Vdict[KIDlist[k]]/.04/.6))
             elif color is 'KIDnum':
                 clr = cmap(norm(KIDlist[k]))
             else:
@@ -727,7 +793,7 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
             if pltkaplan and Temp[mask].size != 0:
                 T,taukaplan = tau_kaplan(Temp[mask].min(),Temp[mask].max(),
                                          tesc=tesc_,kbTc=86.17*S21data[0,21])
-                kaplanfit, = axs[0].plot(T,taukaplan,color=clr,linestyle='-',linewidth=1.)
+                kaplanfit, = axs[0].plot(T,taukaplan,color='k',linestyle='-',linewidth=1.)
                 axs[0].legend((kaplanfit,),('Kaplan',))
             if pltthmfnl:
                 try:
@@ -746,29 +812,17 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
                     warnings.warn('Could not make Thermal FNL, {},KID{},-{} dBm,{}'.format(
                     Chipnum,KIDlist[k],Pread,spec))
                     
-#         axs[0].set_title('Lifetime')
-#         axs[0].set_ylim(8e0,4e3)
         axs[0].set_yscale('log')
-#         axs[1].set_title('Flat Noise Level')
-#         axs[1].set_ylim(-160,-110)
         for i in range(2):
             axs[i].set_xlabel('T (mK)')
-#             axs[i].set_xlim(Temp.min()-10,Temp.max()+10)
         axs[0].set_ylabel(r'$\tau_{qp}^*$ (µs)')
-        if lvlcomp is 'QakV':
-            axs[1].set_ylabel(r'FNL (dBc/Hz-20$\log_{10}$(Q$\alpha_k$/V))')
-        elif lvlcomp is 'Resp':
-            axs[1].set_ylabel(r'FNL (dBc/Hz-20$\log_{10}$(Resp.))')
-        elif lvlcomp is 'QaksqrtV':
-            axs[1].set_ylabel(r'FNL (dBc/Hz-20$\log_{10}(Q\alpha_k/\sqrt{V}))$')
-        elif lvlcomp is 'QaksqrtVtesc':
-            axs[1].set_ylabel(r'FNL (dBc/Hz-20$\log_{10}(Q\alpha_k\sqrt{(1+\tau_{esc}/\tau_{pb})/V}))$')
-        elif lvlcomp is 'QaksqrtVtescTc':
-            axs[1].set_ylabel(
-                r'FNL (dBc/Hz-20$\log_{10}(Q\alpha_k\sqrt{(1+\tau_{esc}/\tau_{pb})(k_BT_c)^3/(V\Delta^2)})$)')
+        
+        if lvlcomp is '':
+            axs[1].set_ylabel('FNL $(dBc/Hz)$')
         else:
-            axs[1].set_ylabel(r'FNL (dBc/Hz)')
-    
+            axs[1].set_ylabel(r'comp. FNL $(dB\tilde{c}/Hz)$')
+        plt.tight_layout()
+            
 def plot_rejspec(Chipnum,KIDnum,sigma,Trange = (0,400),sepT = False, spec='SPR'):
     dfld = get_datafld()
     for j in range(len(sigma)):
@@ -838,4 +892,118 @@ def plot_rejspec(Chipnum,KIDnum,sigma,Trange = (0,400),sepT = False, spec='SPR')
             plt.ylim(0,100)
             plt.tight_layout()
             
+def plot_Qif0(Chipnum,KIDnum,color='Pread',Tmax=.35):
+    dfld = get_datafld()
+    fig,axs = plt.subplots(1,2,figsize=(6.2,2.1))
+    plt.rcParams.update({'font.size':7})
 
+    Preadar = np.array(get_S21Pread(Chipnum,KIDnum))
+    if color is 'Pread':   
+        cmap = matplotlib.cm.get_cmap('plasma')
+        norm = matplotlib.colors.Normalize(-1.05*Preadar.max(),-.95*Preadar.min())
+        clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
+        clb.ax.set_title(r'$P_{read}$ (dBm)')
+    elif color is 'Pint':
+        Pint = np.array(get_Pintdict(Chipnum)[KIDnum])
+        cmap = matplotlib.cm.get_cmap('plasma')
+        norm = matplotlib.colors.Normalize(Pint.min()*1.05,Pint.max()*.95)
+        clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
+        clb.ax.set_title(r'$P_{int}$ (dBm)')
+        
+    for Pread in Preadar:
+        S21data = get_S21data(Chipnum,KIDnum,Pread)
+        if color is 'Pread':
+            clr = cmap(norm(-Pread))
+        elif color is 'Pint':
+            clr = cmap(norm(Pint[Preadar == Pread][0]))
+        T = S21data[:,1]
+        axs[0].plot(T[T<Tmax]*1e3,S21data[T<Tmax,4],color=clr)
+        axs[1].plot(T[T<Tmax]*1e3,S21data[T<Tmax,5]*1e-9,color=clr)
+        
+    for ax in axs:
+        ax.set_xlabel('T (mK)')
+        ax.get_yaxis().get_major_formatter().set_useOffset(False)
+    axs[0].set_ylabel('$Q_i$')
+    axs[0].ticklabel_format(axis='y',style='sci',scilimits=(0,0))
+    axs[1].set_ylabel('$f_0$ (GHz)')
+    fig.tight_layout()
+
+def plot_Nqp(Chipnum,KIDnum,pltPread='all',pltNqpQi=False,relerrthrs=.3,
+             fig=None,ax=None,
+            N0 = 1.72e4,
+            kbTD = 37312.0,
+            kb=86.17):
+    if ax is None or fig is None:
+        fig,ax = plt.subplots(figsize=(3.1,2.1))
+        plt.rcParams.update({'font.size':7})
+
+    if pltPread is 'all':
+        Preadar = get_grPread(Chipnum,KIDnum)[::-1]
+    elif pltPread is 'minmax':
+        Preadar = np.array([get_grPread(Chipnum,KIDnum).max(),
+                            get_grPread(Chipnum,KIDnum).min()])
+    elif pltPread is 'min':
+        Preadar = np.array([get_grPread(Chipnum,KIDnum).max()])
+    elif pltPread is 'max':
+        Preadar = np.array([get_grPread(Chipnum,KIDnum).min()])
+    else:
+        raise ValueError('{} is not a valid Pread selection'.format(pltPread))
+        
+    if Preadar.size >1:
+        cmap = matplotlib.cm.get_cmap('plasma')
+        norm = matplotlib.colors.Normalize(-1.05*Preadar.max(),-.95*Preadar.min())
+        clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap),
+                           ax=ax)
+        clb.ax.set_title(r'$P_{read}$ (dBm)')
+    for Pread in Preadar:
+        S21Pread = np.array(get_S21Pread(Chipnum,KIDnum))
+        closestPread = S21Pread[np.abs(S21Pread - Pread).argmin()]
+        S21data = get_S21data(Chipnum,KIDnum,closestPread)
+        Vsc_ = Vsc(S21data[0,21]*kb,N0,kbTD)
+        if closestPread != Pread:
+            warnings.warn('S21data at another Pread')
+        Respspl = interpolate.splrep(
+                        S21data[:,1]*1e3,np.sqrt(S21data[:,10]*S21data[:,18]),s=0)
+        Temp = get_grTemp(Chipnum,KIDnum,Pread)
+        Nqp,Nqperr = np.zeros((2,len(Temp)))
+        for i in range(len(Temp)):
+            freq,SPR = get_grdata(Chipnum,KIDnum,Pread,Temp[i])
+            freq,SPR = del_otherNoise(freq,SPR)
+            taut,tauterr,lvl,lvlerr = \
+                            tau(freq,SPR,retfnl = True)
+            lvl = lvl/interpolate.splev(Temp[i],Respspl)**2
+            lvlerr = lvlerr/interpolate.splev(Temp[i],Respspl)**2
+            Nqp[i] = lvl/(4*taut*1e-6)
+            Nqperr[i] = np.sqrt((lvlerr/(4*taut*1e-6))**2+\
+                                (-lvl*tauterr*1e-6/(4*(taut*1e-6)**2))**2)
+        mask = ~np.isnan(Nqp)
+        mask[mask] = Nqperr[mask]/Nqp[mask] <= relerrthrs
+        if Preadar.size>1:
+            clr = cmap(norm(-1*Pread))
+        elif pltPread is 'min':
+            clr = 'purple'
+        elif pltPread is 'max':
+            clr = 'gold'
+
+        ax.errorbar(Temp[mask],Nqp[mask]/S21data[0,14],yerr=Nqperr[mask]/S21data[0,14],
+                    color=clr,marker='o',mec='k',capsize=2.)
+        if pltNqpQi:
+            T,Nqp = calc_NqpfromQi(S21data)
+            mask = np.logical_and(T*1e3>ax.get_xlim()[0],T*1e3<ax.get_xlim()[1])
+            ax.plot(T[mask]*1e3,Nqp[mask]/S21data[0,14],
+                    color='g',zorder=len(ax.lines)+1)
+    T = np.linspace(*ax.get_xlim(),100)
+    NqpT = np.zeros(100)
+    for i in range(len(T)):
+        D_ = D(kb*T[i]*1e-3, N0, Vsc_, kbTD)
+        NqpT[i] = nqp(kb*T[i]*1e-3, D_, N0)
+    ax.plot(T,NqpT,color='k',zorder=len(ax.lines)+1)
+    ax.set_ylabel('$n_{qp}$ ($\mu m^{-3}$)')
+    ax.set_xlabel('T (mK)')
+    if pltNqpQi:
+        ax.legend((ax.lines[0],ax.lines[-2],ax.lines[-1]),
+                  ('Data','$n_{qp}$ from $Q_i$','Thermal $n_{qp}$'))
+    else:
+        ax.legend((ax.lines[0],ax.lines[-1]),('Data','Thermal $n_{qp}$'))
+    ax.set_yscale('log')    
+    

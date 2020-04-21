@@ -19,7 +19,7 @@ def get_KIDparam(Chipnum,KIDnum,Pread):
                 return 1/np.sqrt(E**2-D**2)
     Vsc = 1/(integrate.quad(integrand1, D0, kbTD,
                                      args=(D0,))[0]*N0)
-    tesc = datacalc.tesc(Chipnum,KIDnum,Pread)
+    tesc = datacalc.tesc(Chipnum,KIDnum)
     return V,kbTc,D0,Vsc,tesc
 
 
@@ -129,21 +129,18 @@ class Model:
             plt.xlabel('Temperature (K)')
         return Temp,tau,tauerr,lvl,lvlerr
     
-    def calc_phtresp(self,epb,wvl,*args,tStop=2.5e3,points=100,plot=False):
-        t = np.linspace(0,tStop,points)
+    def calc_Nqpevol(self,Nqp_ini,tStop,tInc,*args):
+        t = np.arange(0., tStop, tInc)
         params,*rest = self.calc_params(*args)
-        Nss = root(self.rateeq,np.ones(self.nrRateEqs),args=(t,params),
+        Nss = root(self.rateeq,
+                   np.ones(self.nrRateEqs)*Nqp_ini,
+                   args=(t,params),
+                   tol=1e-12,
                    jac=self.jac,method='hybr').x
         Nini = Nss.copy()
-        Nini[0]+= epb*(6.582e-4*2*np.pi*3e8/(wvl*1e-3))/params[-1]
+        Nini[0] = Nqp_ini
         Nevol = integrate.odeint(self.rateeq,Nini,t,args=(params,))
-        if plot:
-            plt.plot(t,Nevol[:,0]-Nss[0])
-            plt.yscale('log')
-            plt.xlabel('t (µs)')
-            plt.ylabel('Nqp - Nqp0')
-            plt.title('Singel Photon ({} nm) Response'.format(wvl))
-        return t,Nevol,Nss
+        return t,Nevol
     
     #plot fuctions
     def plot_ltlvl(self,T,tau,tauerr,lvl,lvlerr,ax1=None,ax2=None,color='b',fmt=''):

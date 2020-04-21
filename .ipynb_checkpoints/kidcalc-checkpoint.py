@@ -37,28 +37,49 @@ def cinduct(hw, D, kbT):
         [D - hw, -D]), D,args=(hw, D, kbT))[0]
     return s1,s2
 
-# Calculation for energy gap D
-def D(kbT, N0, Vsc, kbTD):
+def Vsc(kbTc,N0,kbTD):
+    D0 = 1.76*kbTc
+    def integrand1(E, D):
+        return 1/np.sqrt(E**2-D**2)
+    return 1/(integrate.quad(integrand1, D0, kbTD,
+                                 args=(D0,))[0]*N0)
+def load_Ddata(N0,Vsc,kbTD):
     if (
         (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.663743323443183e-06)
     ):  # speed-up with interpolate
         Ddata = np.load("C:\\Users\\Steven\\Google Drive\\AP\\Thesis\\Coding\\Ddata_Al_1_2.npy")
-        Dspl = interpolate.splrep(Ddata[0, :], Ddata[1, :], s=0)
-        return np.clip(interpolate.splev(kbT, Dspl),0,None)
     elif (
         (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.736267969683833e-06)
     ):
         Ddata = np.load("C:\\Users\\Steven\\Google Drive\\AP\\Thesis\\Coding\\Ddata_Al_1_255.npy")
-        Dspl = interpolate.splrep(Ddata[0, :], Ddata[1, :], s=0)
-        return np.clip(interpolate.splev(kbT, Dspl),0,None)
     elif (
         (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 1.565803618633812e-05)
     ):
         Ddata = np.load("C:\\Users\\Steven\\Google Drive\\AP\\Thesis\\Coding\\Ddata_Al_12.npy")
+    elif (
+        (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.856715467321348e-06)
+    ):
+        Ddata = np.load("C:\\Users\\Steven\\Google Drive\\AP\\Thesis\\Coding\\Ddata_Al_1_35.npy")
+    elif (
+        (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.716702000311747e-06)
+    ):
+        Ddata = np.load("C:\\Users\\Steven\\Google Drive\\AP\\Thesis\\Coding\\Ddata_Al_1_24.npy")
+    elif (
+        (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.55417723118179e-06)
+    ):
+        Ddata = np.load("C:\\Users\\Steven\\Google Drive\\AP\\Thesis\\Coding\\Ddata_Al_1_12.npy")
+    else:
+        Ddata = None
+    return Ddata
+
+# Calculation for energy gap D
+def D(kbT, N0, Vsc, kbTD):
+    Ddata = load_Ddata(N0,Vsc,kbTD)
+    if Ddata is not None:
         Dspl = interpolate.splrep(Ddata[0, :], Ddata[1, :], s=0)
         return np.clip(interpolate.splev(kbT, Dspl),0,None)
     else:
-        warnings.warn('This takes long.. \n N0={}\n kbTD={}\n Vsc={}'.format(N0,kbTD,Vsc))
+        warnings.warn('D takes long.. \n N0={}\n kbTD={}\n Vsc={}'.format(N0,kbTD,Vsc))
         def integrandD(E, D, kbT, N0, Vsc):
             return N0 * Vsc * (1 - 2 * f(E, kbT)) / np.sqrt(E ** 2 - D ** 2)
 
@@ -83,19 +104,25 @@ def nqp(kbT, D, N0):
             
 
 # Calculation for effective temperature
-def kbTeff(N_qp, N0, V, Vsc, kbTD,kbTc):
-    def minfunc(kbT, N_qp, N0, V, Vsc, kbTD):
-        Dt = D(kbT, N0, Vsc, kbTD)
-        return np.abs(nqp(kbT, Dt, N0) - N_qp/V)
-    res = minisc(
-        minfunc,
-        bounds = (0,kbTc),
-        args=(N_qp, N0, V, Vsc, kbTD), 
-        method="bounded",
-        options = {'xatol':1e-15}
-    )
-    if res.success:
-        return res.x
+def kbTeff(N_qp, N0, V, Vsc, kbTD):
+    Ddata = load_Ddata(N0,Vsc,kbTD)
+    if Ddata is not None:
+        kbTspl = interpolate.splrep(Ddata[2,:],Ddata[0,:])
+        return interpolate.splev(N_qp/V,kbTspl)
+    else:
+        warnings.warn('kbTeff takes long.. \n N0={}\n kbTD={}\n Vsc={}'.format(N0,kbTD,Vsc))
+        def minfunc(kbT, N_qp, N0, V, Vsc, kbTD):
+            Dt = D(kbT, N0, Vsc, kbTD)
+            return np.abs(nqp(kbT, Dt, N0) - N_qp/V)
+        res = minisc(
+            minfunc,
+            bounds = (0,1*86.17),
+            args=(N_qp, N0, V, Vsc, kbTD), 
+            method="bounded",
+            options = {'xatol':1e-15}
+        )
+        if res.success:
+            return res.x
     
 # Calculation of S21 and A,theta
 def beta(lbd0, d, D, D0, kbT):
@@ -144,3 +171,5 @@ def calc_Nwsg(kbT,V,D,e):
     def integrand(E,kbT,V):
         return 3*V*E**2/(2*np.pi*(6.582e-4)**2*(6.3e3)**3*(np.exp(E/kbT)-1))
     return integrate.quad(integrand,e+D,2*D,args=(kbT,V))[0]
+
+
