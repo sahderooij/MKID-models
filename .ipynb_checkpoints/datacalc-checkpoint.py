@@ -299,11 +299,14 @@ def tau(freq, SPR, startf = None, stopf = None, plot=False,retfnl = False):
     else:
         return tau,tauerr
     
-def tau_peak(peakdata_ph,plot = False):
+def tau_peak(peakdata_ph,part='first',plot = False):
     t = (np.arange(len(peakdata_ph)) - 500) 
     peak = peakdata_ph
     
-    fitmask = np.logical_and(t > 10, t < 1e3)
+    if part is 'first':
+        fitmask = np.logical_and(t > 10, t < 1e3)
+    elif part is 'second':
+        fitmask = t>3000
     t2 = t[fitmask]
     peak2 = peak[fitmask]
     fit = curve_fit(
@@ -314,6 +317,7 @@ def tau_peak(peakdata_ph,plot = False):
         plt.figure()
         plt.plot(t, peak)
         plt.plot(t2, fit[1]*np.exp(-t2/fit[0]))
+        plt.yscale('log')
     return fit[0]
 
 def tau_kaplan(Tmin,Tmax,tesc=.14e-3, 
@@ -597,7 +601,7 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
                 pltKIDsep=True,pltthlvl=False,pltkaplan=False,pltthmfnl=False,
                 ax12=None,color='Pread',fmt='-o',
                 defaulttesc=.14e-3,tescPread='max',tescpltkaplan=False,
-                showfit=False):
+                showfit=False,savefig=False):
     def _make_fig(**kwargs):
         fig, axs = plt.subplots(1,2,figsize = (6.2,2.1))
         plt.rcParams.update({'font.size':7})
@@ -670,7 +674,7 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
         if pltKIDsep and ax12 is None:
             fig,axs,cmap,norm = _make_fig(Preadar=Preadar)
             if len(KIDlist) > 1:
-                fig.suptitle('KID{}, {}'.format(KIDlist[k],spec))
+                fig.suptitle('KID{}'.format(KIDlist[k]))
         elif pltKIDsep:
             axs=ax12
 
@@ -822,6 +826,9 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
         else:
             axs[1].set_ylabel(r'comp. FNL $(dB\tilde{c}/Hz)$')
         plt.tight_layout()
+        if savefig:
+            plt.savefig('GR_{}_KID{}.pdf'.format(Chipnum,KIDlist[k]))
+            plt.close()
             
 def plot_rejspec(Chipnum,KIDnum,sigma,Trange = (0,400),sepT = False, spec='SPR'):
     dfld = get_datafld()
@@ -892,12 +899,14 @@ def plot_rejspec(Chipnum,KIDnum,sigma,Trange = (0,400),sepT = False, spec='SPR')
             plt.ylim(0,100)
             plt.tight_layout()
             
-def plot_Qif0(Chipnum,KIDnum,color='Pread',Tmax=.35):
+def plot_Qif0(Chipnum,KIDnum,color='Pread',Tmax=.35,pltPread='all'):
     dfld = get_datafld()
     fig,axs = plt.subplots(1,2,figsize=(6.2,2.1))
     plt.rcParams.update({'font.size':7})
-
-    Preadar = np.array(get_S21Pread(Chipnum,KIDnum))
+    if pltPread is 'all':
+        Preadar = np.array(get_S21Pread(Chipnum,KIDnum))
+    elif type(pltPread) is tuple:
+        Preadar = np.array(get_S21Pread(Chipnum,KIDnum))[pltPread[0]:pltPread[1]]
     if color is 'Pread':   
         cmap = matplotlib.cm.get_cmap('plasma')
         norm = matplotlib.colors.Normalize(-1.05*Preadar.max(),-.95*Preadar.min())
