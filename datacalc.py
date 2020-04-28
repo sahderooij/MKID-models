@@ -241,7 +241,7 @@ def ak(S21data, lbd0=0.092, N0=1.72e4, kbTD=37312.0,plot=False,reterr=False,meth
             plt.xlabel(r'$\beta \delta \sigma_1/2\sigma_2 $')
 
     if reterr:
-        return fit[0],fit[1]
+        return fit[0],np.sqrt(fit[1])
     else:
         return fit[0]
 
@@ -299,26 +299,29 @@ def tau(freq, SPR, startf = None, stopf = None, plot=False,retfnl = False):
     else:
         return tau,tauerr
     
-def tau_peak(peakdata_ph,part='first',plot = False):
+def tau_peak(peakdata_ph,tfit=None,reterr=False,plot = False):
     t = (np.arange(len(peakdata_ph)) - 500) 
     peak = peakdata_ph
     
-    if part is 'first':
+    if tfit is None:
         fitmask = np.logical_and(t > 10, t < 1e3)
-    elif part is 'second':
-        fitmask = t>3000
+    else:
+        fitmask = np.logical_and(t > tfit[0], t < tfit[1])
     t2 = t[fitmask]
     peak2 = peak[fitmask]
     fit = curve_fit(
         lambda x, a, b: b * np.exp(-x / a), t2, peak2, p0=(0.5e3, peak2[0])
-    )[0]
+    )
     
     if plot:
         plt.figure()
         plt.plot(t, peak)
-        plt.plot(t2, fit[1]*np.exp(-t2/fit[0]))
+        plt.plot(t2, fit[0][1]*np.exp(-t2/fit[0][0]))
         plt.yscale('log')
-    return fit[0]
+    if reterr:
+        return fit[0][0],np.sqrt(fit[1][0,0])
+    else: 
+        return fit[0][0]
 
 def tau_kaplan(Tmin,Tmax,tesc=.14e-3, 
                t0=.44,
