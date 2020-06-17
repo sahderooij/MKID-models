@@ -106,6 +106,11 @@ class KID(object):
                      bounds=(0,1),method='bounded',
                      options={'maxiter':5,'xatol':1e-3})
         self.epb = res.x
+    
+    def set_Teff(self,eta,P):
+        R,V,G_B,G_es,N_w0 = self.calc_params()
+        Nqp0 = np.sqrt(V*((1+G_B/G_es)*eta*P/self.D_0+2*G_B*N_w0)/R)
+        self.kbT = kidcalc.kbTeff(Nqp0,self.N0, V, self.Vsc, self.kbTD)
 
 # Calculation functions
     def rateeq(self,N,t,params):
@@ -123,7 +128,7 @@ class KID(object):
         N_w0 = R*self.Nqp_0**2*self.tpb/(2*self.V)  # arb.
         return [R, self.V, G_B, G_es, N_w0]
 
-    def calc_Nqpevol(self, Nqp_ini, tStop=None, tInc=None):
+    def calc_Nqpevol(self, dNqp, tStop=None, tInc=None):
         if tStop is None:
             tStop = 2*self.tqp_1
         if tInc is None:
@@ -131,6 +136,7 @@ class KID(object):
         params = self.calc_params()
 
         # Initial values
+        Nqp_ini = self.Nqp_0 + dNqp
         N_0 = [Nqp_ini, params[-1]]
         
         # Time array
@@ -210,11 +216,11 @@ class KID(object):
         s20 = self.s20
         D_0 = self.D_0
 
-        Nqp_ini = self.Nqp_0 + self.calc_dNqp(hwrad)
+        dNqp = self.calc_dNqp(hwrad)
 
-        t, Nqpwt = self.calc_Nqpevol(Nqp_ini, tStop, tInc,*args)
-        resNqpt = self.calc_resNqpevol(t, Nqpwt[:, 0], hwread)
-#         mask = np.rint(np.linspace(0,len(t)-1,points)).astype(int)
+        t, Nqpwt = self.calc_Nqpevol(dNqp, tStop, tInc,*args)
+        resNqpt = self.calc_resNqpevol(t, Nqpwt[:,0], hwread)
+#         mask = np.rint(np.linspace(0,len(t)-1,points)).astype(int)        
         mask = np.rint(np.logspace(-1, np.log10(len(t)-1), points)).astype(int)
         Nqpts = resNqpt[mask]
         ts = t[mask]
@@ -223,7 +229,7 @@ class KID(object):
         S21 = np.zeros((len(Nqpts)), dtype='complex')
 
         for i in range(len(Nqpts)):
-            S21[i], dAtheta[0, i], dAtheta[1, i] = \
+            S21[i], dAtheta[0,i], dAtheta[1,i] = \
                 self.calc_resp(Nqpts[i], hwread, s20, D_0)
         return ts, S21, dAtheta
     
@@ -351,7 +357,8 @@ class KID(object):
     def plot_resp(self, hwrad, tStop=None, tInc=None,
                   points=50,plot='all'):
         
-        ts, S21, dAtheta = self.calc_respt(hwrad, tStop, tInc, points)
+        ts, S21, dAtheta = self.calc_respt(hwrad, 
+                                           tStop=tStop, tInc=tInc, points=points)
         if plot is 'all' or 'S21' in plot:
             plt.figure(1, figsize=(5, 5))
             self.plot_freqsweep()
@@ -376,6 +383,7 @@ class KID(object):
             plt.ylabel(r'$\delta N_{qp}$')
             plt.xlabel('t (µs)')
             plt.yscale('log')
+    
     def print_params(self):
         #Print Latex table for all the parameters
         units = ['','\micro\electronvolt','\micro\electronvolt','\micro\electronvolt',
@@ -393,7 +401,7 @@ class KID(object):
         for param,value,unit,scalefactor in zip(params,
                                                self.__dict__.values(),
                                                units,scalefactors):
-            print("{:<12}&\SI{{{:.3g}}}{{{:s}}}\\\\".format(param,value*scalefactor,unit))
+            print("{:<12} (\si{{{:s}}})&\SI{{{:.3g}}}{{}}\\\\".format(param,unit,value*scalefactor))
         print('\\end{tabular}')
 
 ########################################################################

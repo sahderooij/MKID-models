@@ -55,6 +55,8 @@ class Model:
                 np.linalg.inv(M+1j*warr[j]*np.eye(len(M))),
                 B,
                 np.linalg.inv(M.transpose()-1j*warr[j]*np.eye(len(M)))]))
+#             Gw = 2/warr[j]**2*np.real(
+#                 np.linalg.inv(np.eye(len(M))+M/(1j*warr[j])).dot(B))
             if PSDs == 'NN+NNt':
                 sw[j] = (Gw[0,0] + Gw[1,0])
             elif PSDs is 'NN':
@@ -101,7 +103,7 @@ class Model:
                     plt.plot(Temp[i],val,ratecol.pop(0)+'.')
                 
             else:
-                freq,swdB = self.calc_spec(lvlcal,*args,Temp[i],PSDs=PSDs)
+                freq,swdB = self.calc_spec(lvlcal,*args,Temp[i]*self.kb,PSDs=PSDs)
 
             tau[i],tauerr[i],lvl[i],lvlerr[i] = datacalc.tau(freq,swdB,
                                                              plot=False,retfnl=True)
@@ -114,7 +116,7 @@ class Model:
             plt.ylabel('Noise level (dBc/Hz)')
             plt.xlabel('Frequency (Hz)')
             clb = plt.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
-            clb.ax.set_title('T (mK)')
+            clb.ax.set_title('T (K)')
             
         if plotnumrates:
             plt.figure('Nums')
@@ -131,17 +133,19 @@ class Model:
             plt.xlabel('Temperature (K)')
         return Temp,tau,tauerr,lvl,lvlerr
     
-    def calc_Nqpevol(self,Nqp_ini,tStop,tInc,*args):
+    def calc_Nqpevol(self,dNqp,tStop,tInc,*args,Nqpnum='free'):
         t = np.arange(0., tStop, tInc)
         params,*rest = self.calc_params(*args)
         Nss = root(self.rateeq,
-                   np.ones(self.nrRateEqs)*Nqp_ini,
+                   np.ones(self.nrRateEqs)*dNqp,
                    args=(t,params),
                    tol=1e-12,
                    jac=self.jac,method='hybr').x
         Nini = Nss.copy()
-        Nini[0] = Nqp_ini
+        Nini[0] += dNqp
         Nevol = integrate.odeint(self.rateeq,Nini,t,args=(params,))
+        if Nqpnum is 'total':
+            Nevol[:,0] += Nevol[:,1]
         return t,Nevol
     
     #plot fuctions
@@ -149,15 +153,13 @@ class Model:
         if ax1 is None or ax2 is None:
             fig,(ax1,ax2)=plt.subplots(1,2,figsize=(12,4))
         mask = np.logical_and(lvl/lvlerr > 2,tau/tauerr > 2)
-        ax1.set_title('Lifetime')
         ax1.errorbar(T[mask]*1e3,tau[mask],yerr=tauerr[mask],color=color,fmt=fmt)
         ax1.set_yscale('log')
-        ax1.set_ylabel(r'$\tau$ $(\mu s)$')
+        ax1.set_ylabel(r'Lifetime (µs)')
         ax1.set_xlabel(r'T (mK)')
-        ax2.set_title('Flat Noise Level')
         ax2.errorbar(T[mask]*1e3,10*np.log10(lvl[mask]),
-                     yerr=10*np.log10((lvlerr[mask]+lvl[mask])/lvl[mask]),color=color,fmt=fmt)
-        ax2.set_ylabel('Noise level (dBc/Hz)')
+        yerr=10*np.log10((lvlerr[mask]+lvl[mask])/lvl[mask]),color=color,fmt=fmt)
+        ax2.set_ylabel('FNL (dB/Hz)')
         ax2.set_xlabel(r'T (mK)')
 
         
@@ -201,10 +203,11 @@ class TrapDetrap(Model):
             self.rateeq,[NT,NT/2,NTw],args=(t,params),
             tol=1e-12,jac=self.jac,method='hybr').x
         #M and B matrices
-        M = np.array([[Gt+2*Rstar*Nqp0/self.V,-Gd],
+        GRstar = 2*Rstar*Nqp0/V
+        M = np.array([[Gt+GRstar,-Gd],
                       [-Gt,Gd]])
-        B = np.array([[Gt*Nqp0+Gd*Nt0+4*Rstar*Nqp0**2/self.V,-Gt*Nqp0-Gd*Nt0],
-                      [-Gt*Nqp0-Gd*Nt0,Gt*Nqp0+Gd*Nt0]])  
+        B = np.array([[2*(GRstar+Gt)*Nqp0,-1*(Gt*Nqp0+Gd*Nt0)],
+                      [-1*(Gt*Nqp0+Gd*Nt0),2*Gd*Nt0]])  
         if retnumrates:
             return M,B,{'NqpT':NT,
                         'Nqp0':Nqp0,
@@ -223,19 +226,18 @@ class TrapDetrapKozo(TrapDetrap):
         R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
         Rstar = R/(1+self.tesc/self.tpb)
         Ges = 1/self.tesc
-        Gessg = Ges
         GB = 1/self.tpb
-        kbTsat = 86.17*0.
-        kbTeff = max(kbT,kbTsat)
+        NwT = R*NT**2/(2*self.V*GB)
+        Nqp0 = np.sqrt(self.V*((1+GB/Ges)*eta*P/D+2*GB*NwT)/R)
+        kbTeff = kidcalc.kbTeff(Nqp0,self.N0,self.V,self.Vsc,self.kbTD)
         Gd = np.sqrt(np.pi)/4*(kbTeff/D)**(3/2)*np.exp(-(D-e)/kbTeff)*\
               (1/t1*(3+2*((D-e)/kbTeff))*kbTeff/D+4/t2*(1+(D-e)/kbTeff))
         Gt = 2*(nrTraps/self.V/(2*self.N0*D))/t2*(1-e/D)*\
-            (1/(np.exp((D-e)/kbT)-1)+1)*(1-1/(np.exp(e/kbT)+1))
-        NwT = R*NT**2/(2*self.V*GB)
+            (1/(np.exp((D-e)/kbTeff)-1)+1)*(1-1/(np.exp(e/kbTeff)+1))
         return [R,self.V,GB,Gt,Gd,Ges,NwT,eta,P,D],NT,Rstar
     
-    def calc_MB(self,e,nrTraps,t1,t2,xi,GBsg,eta,P,kbT,retnumrates = False):
-        params,NT,Rstar = self.calc_params(e,nrTraps,t1,t2,xi,GBsg,eta,P,kbT)
+    def calc_MB(self,e,nrTraps,t1,t2,eta,P,kbT,retnumrates = False):
+        params,NT,Rstar = self.calc_params(e,nrTraps,t1,t2,eta,P,kbT)
         R,V,GB,Gt,Gd,Ges,NwT,eta,P,D = params
         #Steady state values
         t=0 #dummy var. for rate eq.
@@ -441,27 +443,26 @@ class TrapDetrapNtmaxRt(Model):
                                     'Gd':Gd}
         else:
             return M,B
-####################################Trap Detrap Ntmax Rt GBsg #################################
+####################################Trap Detrap Rt GBsg #################################
 class TrapDetrapRtGBsg(Model):
     def __init__(self,V,kbTc,D0,Vsc,tesc):
-        self.nrRateEqs = 4
+        self.nrRateEqs = 2
         super().__init__(V,kbTc,D0,Vsc,tesc)
     #Model equations
     def rateeq(self,Ns,t,params):
-        N,Nt,Nw,Nwsg = Ns
-        R,V,GB,GBsg,Gt,Gd,Rt,Ges,Gessg,NwT,NwsgT,eta,P,D = params
-        return [-R*N**2/V -Rt*N*Nt/(2*V) + 2*GB*Nw - Gt*N + Gd*Nt  + GBsg*Nwsg,
-                Gt*N -Gd*Nt -Rt*N*Nt/(2*V) + GBsg*Nwsg,
-                R*N**2/(2*V) - GB*Nw - Ges*(Nw-NwT),
-                Rt*N*Nt/(2*V) - GBsg*Nwsg - Ges*(Nwsg-NwsgT)]
+        N,Nt = Ns
+        Rstar,V,NT,NtT,Gt,Gd,Rtstar,eta,P,D = params
+        return [-Rstar*(N**2-NT**2)/V -Rtstar*(N*Nt-NT*NtT)/(2*V)\
+                -Gt*(N-NT) +Gd*(Nt-NtT),
+                -Rtstar*(N*Nt-NT*NtT)/(2*V) + Gt*(N-NT) - Gd*(Nt-NtT)]
     
     def jac(self,Ns,t,params):
-        N,Nt,Nw,Nwsg = Ns
-        R,V,GB,GBsg,Gt,Gd,Rt,Ges,Gessg,NwT,NwsgT,eta,P,D = params
-        return [[-2*R*N/V-Rt*Nt/(2*V)-Gt, -Rt*N/(2*V) + Gd, 2*GB,GBsg],
-                [Gt-Rt*Nt/(2*V),-Rt*N/(2*V)-Gd,0,GBsg],
-                [R*N/V ,0,-GB-Ges,0],
-                [Rt*Nt/(2*V),Rt*N/(2*V),0,-GBsg-Ges]]
+        N,Nt = Ns
+        Rstar,V,NT,NtT,Gt,Gd,Rtstar,eta,P,D = params
+        return [[-2*Rstar*N/V-Rtstar*Nt/(2*V)-Gt,
+                -Rtstar*N/(2*V)+Gd],
+                [-Rtstar*Nt/(2*V)+Gt,
+                 -Rtstar*N/(2*V)-Gd]]
 
     def calc_params(self,Gt,Gd,Rt,GBsg,e,eta,P,kbT):
         D = kidcalc.D(kbT,self.N0,self.Vsc,self.kbTD)
@@ -473,7 +474,7 @@ class TrapDetrapRtGBsg(Model):
         GB = 1/self.tpb
         NwT = R*NT**2/(2*self.V*GB)
         NwsgT = kidcalc.calc_Nwsg(kbT,self.V,D,e)
-        return [R,self.V,GB,GBsg,Gt,Gd,Rt,Ges,Gessg,NwT,NwsgT,eta,P,D],NT,Rstar
+        return [Rstar,V,NT,NtT,Gt,Gd,Rt,eta,P,D],NT,Rstar
     
     def calc_MB(self,*args,retnumrates = False):
         params,NT,Rstar = self.calc_params(*args)
@@ -508,40 +509,65 @@ class TrapDetrapRtGBsg(Model):
         else:
             return M,B
 ####################################Kozorzov############################################
-class Kozorezov(TrapDetrapRtGBsg):
-    def calc_params(self,e,nrTraps,t1,t2,xi,GBsg,eta,P,kbT):
+class Kozorezov(Model):
+    def __init__(self,V,kbTc,D0,Vsc,tesc):
+        self.nrRateEqs = 2
+        super().__init__(V,kbTc,D0,Vsc,tesc)
+    #Model equations
+    def rateeq(self,Ns,t,params):
+        N,Nt = Ns
+        Rstar,V,NT,NtT,Gt,Gd,Rtstar,D = params
+        return [-Rstar*(N**2-NT**2)/V -Rtstar*(N*Nt-NT*NtT)/(2*V)\
+                -Gt*(N-NT) +Gd*(Nt-NtT),
+                -Rtstar*(N*Nt-NT*NtT)/(2*V) + Gt*(N-NT) - Gd*(Nt-NtT)]
+    
+    def jac(self,Ns,t,params):
+        N,Nt = Ns
+        Rstar,V,NT,NtT,Gt,Gd,Rtstar,D = params
+        return [[-2*Rstar*N/V-Rtstar*Nt/(2*V)-Gt,
+                -Rtstar*N/(2*V)+Gd],
+                [-Rtstar*Nt/(2*V)+Gt,
+                 -Rtstar*N/(2*V)-Gd]]
+    
+    def calc_params(self,e,nrTraps,t1,t2,xi,kbT):
         D = kidcalc.D(kbT,self.N0,self.Vsc,self.kbTD)
+        c = (nrTraps/self.V/(2*self.N0*D))
         NT = kidcalc.nqp(kbT,D,self.N0)*self.V
+        NtT = self.V*2*self.N0*D*c*np.exp(-e/kbT)
         R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
         Rstar = R/(1+self.tesc/self.tpb)
-        Rt = xi/(t1*self.N0*D)*(1+e/D)
-        Ges = 1/self.tesc
-        Gessg = Ges
-        GB = 1/self.tpb
-        kbTsat = 86.17*0.
-        kbTeff = max(kbT,kbTsat)
-        Gd = np.sqrt(np.pi)/4*(kbTeff/D)**(3/2)*np.exp(-(D-e)/kbTeff)*\
-              (1/t1*(3+2*((D-e)/kbTeff))*kbTeff/D+4/t2*(1+(D-e)/kbTeff))
-        Gt = 2*(nrTraps/self.V/(2*self.N0*D))/t2*(1-e/D)*\
+        Rtstar = xi/(t1*self.N0*D)*(1+e/D)
+        Gd = np.sqrt(np.pi)/4*(kbT/D)**(3/2)*np.exp(-(D-e)/kbT)*\
+              (1/t1*(3+2*((D-e)/kbT))*kbT/D+4/t2*(1+(D-e)/kbT))
+        Gt = 2*c/t2*(1-e/D)*\
             (1/(np.exp((D-e)/kbT)-1)+1)*(1-1/(np.exp(e/kbT)+1))
-        NwT = R*NT**2/(2*self.V*GB)
-        NwsgT = kidcalc.calc_Nwsg(kbT,self.V,D,e)
-        return [R,self.V,GB,GBsg,Gt,Gd,Rt,Ges,Gessg,NwT,NwsgT,eta,P,D],NT,Rstar
+        return [Rstar,self.V,NT,NtT,Gt,Gd,Rtstar,D],NT,Rstar
+    
+    def calc_MB(self,*args,retnumrates = False):
+        params,NT,Rstar = self.calc_params(*args)
+        Rstar,V,NT,NtT,Gt,Gd,Rtstar,D = params
+        #Steady state values
+        t=0 #dummy var. for rate eq.
+        Nqp0,Nt0 = root(
+            self.rateeq,[NT,NT/2],args=(t,params),
+            tol=1e-12,jac=self.jac,method='hybr').x
 
-    #Params for TrapDetrapRt:
-#     def calc_params(self,e,nrTraps,t1,t2,xi,eta,P,kbT):
-#         D = kidcalc.D(kbT,self.N0,self.Vsc,self.kbTD)
-#         NT = kidcalc.nqp(kbT,D,self.N0)*self.V
-#         R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
-#         Rstar = R/(1+self.tesc/self.tpb)
-#         Rt = xi/(t1*self.N0*D)*(1+e/D)
-#         Ges = 1/self.tesc
-#         GB = 1/self.tpb
-#         kbTsat = 86.17*0.
-#         kbTeff = max(kbT,kbTsat)
-#         Gd = (np.sqrt(np.pi)/4*(kbTeff/D)**(3/2)*np.exp(-(D-e)/kbTeff)*\
-#               (1/t1*(3+2*((D-e)/kbTeff))*kbTeff/D+4/t2*(1+(D-e)/kbTeff)))
-#         Gt = 2*(nrTraps/self.V/(2*self.N0*D))/t2*(1-e/D)*\
-#             (1/(np.exp((D-e)/kbT)-1)+1)*(1-1/(np.exp(e/kbT)+1))
-#         NTw = R*NT**2/(2*self.V*GB)
-#         return [R,self.V,GB,Gt,Gd,Rt,Ges,NTw,eta,P,D],NT,Rstar
+        #M and B matrices
+        M = np.array([[Gt+2*Rstar*Nqp0/V+Rtstar*Nt0/(2*V),Rtstar*Nqp0/(2*V)-Gd],
+                      [Rtstar*Nt0/(2*V)-Gt,Gd+Rtstar*Nqp0/(2*V)]])
+        B = np.array([[Gt*Nqp0+Gd*Nt0+4*Rstar*Nqp0**2/V+Rtstar*Nqp0*Nt0/V,
+                       -Gt*Nqp0-Gd*Nt0-Rtstar*Nqp0*Nt0/V],
+                      [-Gt*Nqp0-Gd*Nt0-Rtstar*Nqp0*Nt0/V,
+                       Gt*Nqp0+Gd*Nt0+5*Rtstar*Nqp0*Nt0/V]])
+
+        if retnumrates:
+            return M,B,{'NqpT':NT,
+                        'Nqp0':Nqp0,
+                        'NtT':NtT,
+                        'Nt0':Nt0},{'R*NqpT/2V':Rstar*NT/(2*V),
+                                        'R*Nqp0/2V':Rstar*Nqp0/(2*V),
+                                        'Rt*Nt0/2V':Rtstar*Nt0/(2*V),
+                                        'Gt':Gt,
+                                        'Gd':Gd}
+        else:
+            return M,B
