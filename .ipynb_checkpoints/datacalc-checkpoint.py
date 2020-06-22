@@ -219,8 +219,13 @@ def ak(S21data, lbd0=0.092, N0=1.72e4, kbTD=37312.0,plot=False,reterr=False,meth
     mask1 = np.zeros(len(y), dtype="bool")
     mask1[np.unique(np.round(S21data[:, 1], decimals=2),
                     return_index=True)[1]] = True
-    mask = np.logical_and(mask1, (kbT >= 0.25 * 86.17))
-    y = y[mask]
+    mask = np.logical_and(mask1, (kbT >= .25 * 86.17))
+    if mask.sum() > 3:
+        y = y[mask]
+    else:
+        warnings.warn('Little high temperature S21data')
+        y = y[mask1][-10:]
+    
 
     x = np.zeros(len(y))
     i = 0
@@ -728,9 +733,9 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
             S21Pread = np.array(get_S21Pread(Chipnum,KIDlist[k]))
             closestPread = S21Pread[np.abs(S21Pread - Pread).argmin()]
             S21data = get_S21data(Chipnum,KIDlist[k],closestPread)
-            akin = ak(S21data)
+            if 'ak' in lvlcomp:
+                akin = ak(S21data)
             V = S21data[0,14]
-            Qspl = interpolate.splrep(S21data[:,1]*1e3,S21data[:,2],s=0)
             if spec is 'cross':
                 Respspl = interpolate.splrep(
                     S21data[:,1]*1e3,np.sqrt(S21data[:,10]*S21data[:,18]),s=0)
