@@ -335,24 +335,21 @@ def tau_peak(peakdata_ph,tfit=None,reterr=False,plot=False):
     else: 
         return fit[0][0]
 
-def tau_kaplan(Tmin,Tmax,tesc=.14e-3, 
+def tau_kaplan(T,tesc=.14e-3, 
                t0=.44,
                kb = 86.17,
                tpb=.28e-3,
                N0=1.72e4,
-               kbTc = 1.2*86.17,
+               kbTc=1.2*86.17,
                kbTD=37312.0,):
     D0 = 1.76 * kbTc
     def integrand1(E, D):
         return 1 / np.sqrt(E ** 2 - D ** 2)
     Vsc = 1 / (integrate.quad(integrand1, D0, kbTD, args=(D0,))[0] * N0)
-    T = np.linspace(Tmin,Tmax,100)
-    taukaplan = np.zeros(len(T))
-    for i in range(len(T)):
-        D_ = D(kb*T[i]*1e-3, N0, Vsc, kbTD)
-        nqp_ = nqp(kb*T[i]*1e-3, D_, N0)
-        taukaplan[i] = t0*N0*kbTc**3/(4*nqp_*D_**2)*(1+tesc/tpb) 
-    return T,taukaplan
+    D_ = D(kb*T, N0, Vsc, kbTD)
+    nqp_ = nqp(kb*T, D_, N0)
+    taukaplan = t0*N0*kbTc**3/(4*nqp_*D_**2)*(1+tesc/tpb) 
+    return taukaplan
     
 def kbTbeff(S21data,tqpstar,
     t0=.44,
@@ -451,8 +448,8 @@ def tesc(Chipnum,KIDnum,Pread='max',
         plt.errorbar(Temp,tqpstar,yerr=tqpstarerr,capsize=5.,fmt='o')
         mask = ~np.isnan(tescar)
         plt.errorbar(Temp[mask],tqpstar[mask],fmt='o')
-        T,taukaplan = tau_kaplan(Temp[~np.isnan(tqpstar)].min(),
-                   Temp[~np.isnan(tqpstar)].max(),tesc=tesc1,kbTc=kbTc)  
+        T,taukaplan = tau_kaplan(np.linspace(Temp[~np.isnan(tqpstar)].min(),
+                   Temp[~np.isnan(tqpstar)].max(),100),tesc=tesc1,kbTc=kbTc)  
         plt.plot(T,taukaplan)
         plt.yscale('log')
         plt.ylim(None,1e4)
@@ -645,12 +642,14 @@ def plot_spec(Chipnum,KIDlist=None,Pread='min',spec=['cross'],lvlcomp='',clbar=T
 def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
                 lvlcomp='',delampNoise=True,del1fNoise=True,relerrthrs=.3,
                 pltKIDsep=True,pltthlvl=False,pltkaplan=False,pltthmfnl=False,
-                ax12=None,color='Pread',fmt='-o',label=None,
+                fig=None,ax12=None,color='Pread',fmt='-o',label=None,
                 defaulttesc=.14e-3,tescPread='max',tescpltkaplan=False,
                 showfit=False,savefig=False):
-    def _make_fig(**kwargs):
-        fig, axs = plt.subplots(1,2,figsize = (6.2,2.1))
-        plt.rcParams.update({'font.size':7})
+    def _make_fig():
+        plt.rcParams.update({'font.size':12})
+        fig, axs = plt.subplots(1,2,figsize=(9,3))
+        return fig,axs
+    def _get_cmap(**kwargs):
         if color is 'Pread':
             cmap = matplotlib.cm.get_cmap('plasma')
             norm = matplotlib.colors.Normalize(-1.1*Preadar.max(),-.9*Preadar.min())
@@ -677,10 +676,12 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
             clb.ax.set_title('KID nr.')
         else:
             raise ValueError('{} is not a valid variable as color'.format(color))
-        return fig,axs,cmap,norm
+        return cmap,norm
             
     if KIDlist is None:
         KIDlist = get_grKIDs(Chipnum)
+    elif type(KIDlist) is float:
+        KIDlist = [KIDlist]
         
     if color is 'Pint':
         Pintdict = get_Pintdict(Chipnum)
@@ -688,7 +689,7 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
         Vdict = get_Vdict(Chipnum)
         
     if not pltKIDsep and (ax12 is None):
-        fig,axs,cmap,norm = _make_fig()
+        fig,axs = _make_fig()
     elif not pltKIDsep:
         axs = ax12
         
@@ -718,11 +719,12 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
             raise ValueError('{} is not a valid Pread selection'.format(pltPread))
             
         if pltKIDsep and ax12 is None:
-            fig,axs,cmap,norm = _make_fig(Preadar=Preadar)
+            fig,axs = _make_fig()
+            cmap,norm = _get_cmap(Preadar=Preadar)
             if len(KIDlist) > 1:
                 fig.suptitle('KID{}'.format(KIDlist[k]))
         elif pltKIDsep:
-            axs=ax12
+            axs=ax12        
 
         if pltthlvl or 'tesc' in lvlcomp or pltkaplan:
             tesc_ = tesc(Chipnum,KIDlist[k],
@@ -846,7 +848,7 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
                 thlvlplot, = axs[1].plot(Ttemp,10*np.log10(explvl),color=clr,linestyle='--')
                 axs[1].legend((thlvlplot,),(r'FNL from responsivity',))
             if pltkaplan and Temp[mask].size != 0:
-                T,taukaplan = tau_kaplan(Temp[mask].min(),Temp[mask].max(),
+                T,taukaplan = tau_kaplan(np.linspace(Temp[mask].min(),Temp[mask].max(),100),
                                          tesc=tesc_,kbTc=86.17*S21data[0,21])
                 kaplanfit, = axs[0].plot(T,taukaplan,color='k',linestyle='-',linewidth=1.)
                 axs[0].legend((kaplanfit,),('Kaplan',))
@@ -873,21 +875,23 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
         axs[0].set_ylabel(r'$\tau_{qp}^*$ (µs)')
         
         if lvlcomp is 'Resp':
-            axs[1].set_ylabel(r'FNL/$\rho^2(T)$ (dB/Hz)')
+            axs[1].set_ylabel(r'FNL/$\mathcal{R}(T)$ (dB/Hz)')
         elif lvlcomp is 'RespV':            
-            axs[1].set_ylabel(r'FNL/$(\rho^2(T)V)$ (dB/Hz)')
+            axs[1].set_ylabel(r'FNL/$(\mathcal{R}(T)V)$ (dB/Hz)')
         elif lvlcomp is 'RespVtescTc':   
-            axs[1].set_ylabel(r'FNL/$(\rho^2(T)\chi)$ (dB/Hz)')   
+            axs[1].set_ylabel(r'FNL/$(\mathcal{R}(T)\chi)$ (dB/Hz)')   
         elif lvlcomp is '':
             axs[1].set_ylabel(r'FNL (dB/Hz)')
         elif lvlcomp is 'RespLowT':
-            axs[1].set_ylabel(r'FNL/$\rho^2(T=50 mK)$ (dB/Hz)')
+            axs[1].set_ylabel(r'FNL/$\mathcal{R}(T=50 mK)$ (dB/Hz)')
         else:
             axs[1].set_ylabel(r'comp. FNL (dB/Hz)')
         plt.tight_layout()
         if savefig:
             plt.savefig('GR_{}_KID{}_{}.pdf'.format(Chipnum,KIDlist[k],spec))
             plt.close()
+        if ax12 is None:
+            return fig,axs
             
 def plot_rejspec(Chipnum,KIDnum,sigma,Trange = (0,400),sepT = False, spec='SPR'):
     dfld = get_datafld()
