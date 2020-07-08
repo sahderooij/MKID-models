@@ -47,27 +47,31 @@ def load_Ddata(N0,Vsc,kbTD):
     if (
         (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.663743323443183e-06)
     ):  # speed-up with interpolate
-        Ddata = np.load("C:\\Users\\Steven\\Google Drive\\AP\\Thesis\\Coding\\Ddata_Al_1_2.npy")
+        Ddata = np.load("../Coding/Ddata_Al_1_2.npy")
     elif (
         (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.736267969683833e-06)
     ):
-        Ddata = np.load("C:\\Users\\Steven\\Google Drive\\AP\\Thesis\\Coding\\Ddata_Al_1_255.npy")
+        Ddata = np.load("../Coding/Ddata_Al_1_255.npy")
     elif (
         (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 1.565803618633812e-05)
     ):
-        Ddata = np.load("C:\\Users\\Steven\\Google Drive\\AP\\Thesis\\Coding\\Ddata_Al_12.npy")
+        Ddata = np.load("../Coding/Ddata_Al_12.npy")
     elif (
         (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.856715467321348e-06)
     ):
-        Ddata = np.load("C:\\Users\\Steven\\Google Drive\\AP\\Thesis\\Coding\\Ddata_Al_1_35.npy")
+        Ddata = np.load("../Coding/Ddata_Al_1_35.npy")
     elif (
         (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.716702000311747e-06)
     ):
-        Ddata = np.load("C:\\Users\\Steven\\Google Drive\\AP\\Thesis\\Coding\\Ddata_Al_1_24.npy")
+        Ddata = np.load("../Coding/Ddata_Al_1_24.npy")
     elif (
         (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.55417723118179e-06)
     ):
-        Ddata = np.load("C:\\Users\\Steven\\Google Drive\\AP\\Thesis\\Coding\\Ddata_Al_1_12.npy")
+        Ddata = np.load("../Coding/Ddata_Al_1_12.npy")
+    elif (
+        (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.729763352867993e-06)
+    ):
+        Ddata = np.load("../Coding/Ddata_Al_1_25.npy")
     else:
         Ddata = None
     return Ddata
@@ -100,7 +104,15 @@ def nqp(kbT, D, N0):
     else:
         def integrand(E, kbT, D, N0):
             return 4 * N0 * E / np.sqrt(E ** 2 - D ** 2) * f(E, kbT)
-        return integrate.quad(integrand, D, np.inf, args=(kbT, D, N0))[0]
+        if kbT.size is 1 and D.size is 1:#make sure it can deal with kbT,D arrays
+            return integrate.quad(integrand, D, np.inf, args=(kbT, D, N0))[0]
+        else:
+            assert (kbT.size == D.size),'kbT and D arrays are not of the same size'
+            result = np.zeros(len(kbT))
+            for i in range(len(kbT)):
+                result[i] = integrate.quad(
+                    integrand, D[i], np.inf, args=(kbT[i], D[i], N0))[0]
+            return result
             
 
 # Calculation for effective temperature

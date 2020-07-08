@@ -17,7 +17,7 @@ from kidcalc import D, beta, cinduct, hwread, hwres, kbTeff, nqp,Vsc
 #################################################################
 
 def get_datafld():
-    return "G:\\Thesis_data\\"
+    return "D:\\MKIDdata\\"
 
 def get_S21KIDs(Chipnum):
     datafld = get_datafld()
@@ -146,14 +146,18 @@ def del_ampNoise(freq,SPR,plot=False):
     #Make it non-dB
     SPRn = 10**(SPR/10)
     #Substract amplifier noise
-    if SPRn[np.logical_and(freq>3e4,freq<2e5)].size > 0 and \
-        SPRn[np.logical_and(freq>3e2,freq<1e4)].size > 0:
+    startr1 = 3e4
+    stopr1 = 2e5
+    startr2 = 3e2
+    stopr2 = 1e4
+    if SPRn[np.logical_and(freq>startr1,freq<stopr1)].size > 0 and \
+        SPRn[np.logical_and(freq>startr2,freq<stopr2)].size > 0:
         #sometimes amplifier noise is higher.. so check:
-        if SPRn[np.logical_and(freq>3e4,freq<2e5)].mean() < \
-            SPRn[np.logical_and(freq>3e2,freq<1e4)].mean():
-            SPRn -= SPRn[np.logical_and(freq>3e4,freq<2e5)].max()
+        if SPRn[np.logical_and(freq>startr1,freq<stopr1)].mean() < \
+            SPRn[np.logical_and(freq>startr2,freq<stopr2)].mean():
+            SPRn -= SPRn[np.logical_and(freq>startr1,freq<stopr1)].max()
         else:
-            SPRn -= SPRn[np.logical_and(freq>3e2,freq<1e4)].min()
+            SPRn -= SPRn[np.logical_and(freq>startr2,freq<stopr2)].min()
     #filter positive 
     freqn = freq[SPRn>0]
     SPRn = SPRn[SPRn>0]
@@ -173,6 +177,7 @@ def del_1fNoise(freq,SPR,plot=False):
     SPR = SPR[SPR!=-140]
     #Make it non-dB
     SPRn = 10**(SPR/10)
+    
     SPRn -= freq**-.5*np.mean(SPRn[1:4])
     #filter positive 
     freqn = freq[SPRn>0]
@@ -261,14 +266,14 @@ def tau(freq, SPR, startf = None, stopf = None, plot=False,retfnl = False):
     #Filter non-values
     freq = freq[SPR!=-140]
     SPR = SPR[SPR!=-140]
-    if startf is None:
-        startf = 1e1
     if stopf is None:
-        bdwth = np.logical_and(freq>3e2,freq<2e4)
+        bdwth = np.logical_and(freq>3e2,freq<1e4)
         try:
             stopf = freq[bdwth][np.real(SPR[bdwth]).argmin()]
         except:
             stopf = 2e4
+    if startf is None:
+        startf = 1e1
     
     # fitting a Lorentzian
     fitmask = np.logical_and(freq > startf, freq < stopf)
@@ -338,10 +343,10 @@ def tau_peak(peakdata_ph,tfit=None,reterr=False,plot=False):
 def tau_kaplan(T,tesc=.14e-3, 
                t0=.44,
                kb = 86.17,
-               tpb=.28e-3,
-               N0=1.72e4,
-               kbTc=1.2*86.17,
-               kbTD=37312.0,):
+               tpb = .28e-3,
+               N0 = 1.72e4,
+               kbTc = 1.2*86.17,
+               kbTD = 37312.0,):
     D0 = 1.76 * kbTc
     def integrand1(E, D):
         return 1 / np.sqrt(E ** 2 - D ** 2)
@@ -562,8 +567,9 @@ def init_KID(Chipnum,KIDnum,Pread,Tbath,Teffmethod = 'GR',wvl = None,S21 = False
 #################################################################
 ######################### PLOT FUNCTIONS ######################## 
 #################################################################
-def plot_spec(Chipnum,KIDlist=None,Pread='min',spec=['cross'],lvlcomp='',clbar=True,
-              del1fNoise=False,delampNoise=False,Tmin=0,Tmax=500,ax12=None):
+def plot_spec(Chipnum,KIDlist=None,Pread='all',spec=['cross'],lvlcomp='',clbar=True,
+              del1fNoise=False,delampNoise=False,Tmin=0,Tmax=500,ax12=None,
+             xlim=(None,None),ylim=(None,None)):
     if KIDlist is None:
         KIDlist = get_grKIDs(Chipnum)
     
@@ -590,6 +596,8 @@ def plot_spec(Chipnum,KIDlist=None,Pread='min',spec=['cross'],lvlcomp='',clbar=T
             Preadar = allPread
         elif type(Pread) is np.ndarray:
             Preadar = Pread
+        elif type(Pread) is list:
+            Preadar = np.array(Pread)
         else:
             raise ValueError('{} is not a valid Pread option'.format(Pread))
         if ax12 is None:
@@ -637,6 +645,10 @@ def plot_spec(Chipnum,KIDlist=None,Pread='min',spec=['cross'],lvlcomp='',clbar=T
                     axs[ax1,ax2].set_xscale('log')
                     axs[ax1,ax2].set_title(spec+ ', -{} dBm'.format(_Pread))
                     axs[-1,ax2].set_xlabel('Freq. (Hz)')
+                    axs[-1,ax2].set_xlim(*xlim)
+                axs[ax1,0].set_ylim(*ylim)
+        if ax12 is None:
+            fig.tight_layout(rect=(0,0,1,1-.15/len(Preadar)))
                     
                     
 def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
@@ -715,6 +727,8 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
             Preadar = get_grPread(Chipnum,KIDlist[k])[::-1]
         elif type(pltPread) is np.ndarray:
             Preadar = pltPread
+        elif type(pltPread) is list:
+            Preadar = np.array(pltPread)
         else:
             raise ValueError('{} is not a valid Pread selection'.format(pltPread))
             
@@ -813,6 +827,8 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
                 if showfit:
                     plt.title('{}, KID{}, -{} dBm, T={}, {},\n relerr={}'.format(
                         Chipnum,KIDlist[k],Pread,Temp[i],spec,tauterr[i]/taut[i]))
+                    plt.xlim(1e-1,1e5)
+                    plt.ylim(-110,-65)
                                 
                 lvl[i] = lvl[i]/interpolate.splev(Temp[i],sqrtlvlcompspl)**2
                 lvlerr[i] = lvlerr[i]/interpolate.splev(Temp[i],sqrtlvlcompspl)**2
@@ -848,10 +864,11 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
                 thlvlplot, = axs[1].plot(Ttemp,10*np.log10(explvl),color=clr,linestyle='--')
                 axs[1].legend((thlvlplot,),(r'FNL from responsivity',))
             if pltkaplan and Temp[mask].size != 0:
-                T,taukaplan = tau_kaplan(np.linspace(Temp[mask].min(),Temp[mask].max(),100),
-                                         tesc=tesc_,kbTc=86.17*S21data[0,21])
-                kaplanfit, = axs[0].plot(T,taukaplan,color='k',linestyle='-',linewidth=1.)
+                T = np.linspace(Temp[mask].min(),Temp[mask].max(),100)*1e-3
+                taukaplan = tau_kaplan(T,tesc=tesc_,kbTc=86.17*S21data[0,21])
+                kaplanfit, = axs[0].plot(T*1e3,taukaplan,color='k',linestyle='-',linewidth=1.)
                 axs[0].legend((kaplanfit,),('Kaplan',))
+                
             if pltthmfnl:
                 try:
                     tauspl = interpolate.splrep(Temp[mask],taut[mask],s=0)
@@ -890,8 +907,8 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',
         if savefig:
             plt.savefig('GR_{}_KID{}_{}.pdf'.format(Chipnum,KIDlist[k],spec))
             plt.close()
-        if ax12 is None:
-            return fig,axs
+    if ax12 is None:
+        return fig,axs
             
 def plot_rejspec(Chipnum,KIDnum,sigma,Trange = (0,400),sepT = False, spec='SPR'):
     dfld = get_datafld()
@@ -1006,10 +1023,10 @@ def plot_Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
              fig=None,ax=None,
             N0 = 1.72e4,
             kbTD = 37312.0,
-            kb=86.17):
+            kb = 86.17):
     if ax is None or fig is None:
-        fig,ax = plt.subplots(figsize=(3.1,2.1))
-        plt.rcParams.update({'font.size':7})
+        fig,ax = plt.subplots()
+        plt.rcParams.update({'font.size':10})
 
     if pltPread is 'all':
         Preadar = get_grPread(Chipnum,KIDnum)[::-1]
@@ -1020,15 +1037,20 @@ def plot_Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         Preadar = np.array([get_grPread(Chipnum,KIDnum).max()])
     elif pltPread is 'max':
         Preadar = np.array([get_grPread(Chipnum,KIDnum).min()])
+    elif type(pltPread) is np.ndarray:
+        Preadar = pltPread
+    elif type(pltPread) is list:
+        Preadar = np.array(pltPread)
     else:
         raise ValueError('{} is not a valid Pread selection'.format(pltPread))
         
-    if Preadar.size >1:
+    if Preadar.size > 1:
         cmap = matplotlib.cm.get_cmap('plasma')
         norm = matplotlib.colors.Normalize(-1.05*Preadar.max(),-.95*Preadar.min())
         clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap),
                            ax=ax)
         clb.ax.set_title(r'$P_{read}$ (dBm)')
+        
     for Pread in Preadar:
         S21Pread = np.array(get_S21Pread(Chipnum,KIDnum))
         closestPread = S21Pread[np.abs(S21Pread - Pread).argmin()]
@@ -1061,13 +1083,13 @@ def plot_Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
                                 (-lvl*tauterr*1e-6/(4*(taut[i]*1e-6)**2))**2)
         mask = ~np.isnan(Nqp)
         mask[mask] = Nqperr[mask]/Nqp[mask] <= relerrthrs
-        if Preadar.size>1:
+        if Preadar.size > 1:
             clr = cmap(norm(-1*Pread))
         elif pltPread is 'min':
             clr = 'purple'
         elif pltPread is 'max':
             clr = 'gold'
-
+            
         ax.errorbar(Temp[mask],Nqp[mask]/S21data[0,14],yerr=Nqperr[mask]/S21data[0,14],
                     color=clr,marker='o',mec='k',capsize=2.)
         if pltNqpQi:
@@ -1082,7 +1104,8 @@ def plot_Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         if pltNqptau:
             nqp_ = calc_nqpfromtau(taut,Chipnum,KIDnum,tescPread=tescPread)
             ax.plot(Temp[mask],nqp_[mask],
-                   color=clr,zorder=len(ax.lines)+1)
+                   color=clr,zorder=len(ax.lines)+1,
+                    label='$n_{qp}$ from $\\tau_{qp}^*$')
     if pltThrm:
         T = np.linspace(*ax.get_xlim(),100)
         nqpT = np.zeros(100)
