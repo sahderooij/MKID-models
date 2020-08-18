@@ -98,9 +98,9 @@ class KID(object):
         def minfunc(epb,hwrad,tres,var,peakheight):
             self.epb = epb
             _,_,dAtheta = self.calc_respt(hwrad,*args,tStop=3*tres,points=10) 
-            if var is 'phase':
+            if var == 'phase':
                 return np.abs(dAtheta[1,:].max()-peakheight)
-            elif var is 'amp':
+            elif var == 'amp':
                 return np.abs(dAtheta[0,:].max()-peakheight)
         res = minisc(minfunc,args=(hwrad,tres,var,peakheight),
                      bounds=(0,1),method='bounded',
@@ -310,13 +310,13 @@ class KID(object):
         ts, S21, dAtheta = self.calc_respt(hwrad, tStop, tInc, points)
 
         plt.yscale('log')
-        if plot is 'both':
+        if plot == 'both':
             plt.plot(ts, dAtheta[0, :])
             plt.figure()
             plt.plot(ts, dAtheta[1, :])
-        if plot is 'dA':
+        if plot == 'dA':
             plt.plot(ts, dAtheta[0, :])
-        if plot is 'theta':
+        if plot == 'theta':
             plt.plot(ts, dAtheta[1, :])
 
     def plot_Nqpt(self, hwrad, tStop=None, tInc=None,
@@ -359,25 +359,25 @@ class KID(object):
         
         ts, S21, dAtheta = self.calc_respt(hwrad, 
                                            tStop=tStop, tInc=tInc, points=points)
-        if plot is 'all' or 'S21' in plot:
+        if plot == 'all' or 'S21' in plot:
             plt.figure(1, figsize=(5, 5))
             self.plot_freqsweep()
             plt.plot(np.real(S21), np.imag(S21), '.b') 
             plt.xlabel(r'$Re(S_{21})$')
             plt.ylabel(r'$Im(S_{21})$')
-        if plot is 'all' or 'Amp' in plot:
+        if plot == 'all' or 'Amp' in plot:
             plt.figure(2)
             plt.plot(ts, dAtheta[0, :])
             plt.xlabel('t (µs)')
             plt.ylabel(r'$\delta A$')
             plt.yscale('log')
-        if plot is 'all' or 'Phase' in plot:
+        if plot == 'all' or 'Phase' in plot:
             plt.figure(3)
             plt.plot(ts, dAtheta[1, :])
             plt.xlabel('t (µs)')
             plt.ylabel(r'$\theta$')
             plt.yscale('log')
-        if plot is 'all' or 'Nqp' in plot:
+        if plot == 'all' or 'Nqp' in plot:
             plt.figure(4)
             self.plot_Nqpt(hwrad, tStop, tInc)
             plt.ylabel(r'$\delta N_{qp}$')

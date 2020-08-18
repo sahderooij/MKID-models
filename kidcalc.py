@@ -72,6 +72,10 @@ def load_Ddata(N0,Vsc,kbTD):
         (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.729763352867993e-06)
     ):
         Ddata = np.load("../Coding/Ddata_Al_1_25.npy")
+    elif (
+        (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.540116499452516e-06)
+    ):
+        Ddata = np.load("../Coding/Ddata_Al_1_11.npy")
     else:
         Ddata = None
     return Ddata
@@ -104,7 +108,7 @@ def nqp(kbT, D, N0):
     else:
         def integrand(E, kbT, D, N0):
             return 4 * N0 * E / np.sqrt(E ** 2 - D ** 2) * f(E, kbT)
-        if kbT.size is 1 and D.size is 1:#make sure it can deal with kbT,D arrays
+        if kbT.size == 1 and D.size == 1:#make sure it can deal with kbT,D arrays
             return integrate.quad(integrand, D, np.inf, args=(kbT, D, N0))[0]
         else:
             assert (kbT.size == D.size),'kbT and D arrays are not of the same size'
