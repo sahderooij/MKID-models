@@ -34,8 +34,10 @@ def get_S21Pread(Chipnum,KIDnum):
         int(i.split('\\')[-1].split('_')[1][:-3]) 
         for i in glob.glob(S21fld + '\\KID{}_*Tdep.csv'.format(KIDnum))])
 
-def get_S21dat(Chipnum,KIDnum,Pread):
-    #To make faster: read at once and split with '\n\n' and '\n'
+def get_S21dat(Chipnum,KIDnum,Pread=None):
+    if Pread is None:
+        Pread = get_S21Pread(Chipnum,KIDnum)[0]
+    #To make faster/less code: read at once and split with '\n\n' and '\n'
     datafld = get_datafld()
     datdata = {}
     with open(datafld + "{}/S21/2D/KID{}_{}dBm_.dat".format(
@@ -236,8 +238,12 @@ def del_1fnNoise(freq,SPR,plot=False):
     SPR = SPR[SPR!=-140]
     #Make it non-dB
     SPRn = 10**(SPR/10)
-    
-    fit = curve_fit(lambda f,a,b: a*f**(-b),freq[1:],SPRn[1:],p0=(SPRn[1:4].mean(),1))
+    try:
+        fit = curve_fit(lambda f,a,b: a*f**(-b),
+                        freq[~np.isnan(SPRn)][1:],SPRn[~np.isnan(SPRn)][1:],
+                        p0=(SPRn[~np.isnan(SPRn)][1:4].mean(),1))
+    except:
+        fit = np.array([[np.nan,np.nan]])
     
     if fit[0][1] > .35:
         SPRn -= fit[0][0]*freq**(-fit[0][1])
@@ -267,9 +273,10 @@ def subtr_spec(freq,SPR,mfreq,mSPR,plot=False):
     lmSPR = 10**(mSPR[mask]/10)
     
     #Scale mSPR:
-    ampfreq = (3e4,2e5)
-    ampmask = np.logical_and(mfreq[mask]>ampfreq[0],mfreq[mask]<ampfreq[1])
-    lmSPR *= lSPR[ampmask].mean()/lmSPR[ampmask].mean()
+#     ampfreq = (3e4,2e5)
+#     ampmask = np.logical_and(mfreq[mask]>ampfreq[0],mfreq[mask]<ampfreq[1])
+#     lmSPR *= lSPR[ampmask].mean()/lmSPR[ampmask].mean()
+    lmSPR *= lSPR[-1]/lmSPR[-1]
     #Subtract:
     sSPR = lSPR - lmSPR
     sSPR[sSPR<=0] = np.nan
@@ -393,14 +400,17 @@ def tau(freq, SPR, startf = None, stopf = None, plot=False,retfnl = False):
         def Lorspec(f, t, N):
             SN = 4 * N * t / (1 + (2 * np.pi * f * t) ** 2)
             return SN
-
-        fit = curve_fit(Lorspec, fitfreq, fitPSD,
-                        bounds=([0, 0], [np.inf, np.inf]),
-                        p0=(2e-4, 1e4))
-        tau = fit[0][0]*1e6
-        tauerr = np.sqrt(np.diag(fit[1]))[0]*1e6
-        N = fit[0][1]*10**(np.real(SPR.max())/10)
-        Nerr = np.sqrt(np.diag(fit[1]))[1]*10**(np.real(SPR.max())/10)
+        
+        try:
+            fit = curve_fit(Lorspec, fitfreq, fitPSD,
+                            bounds=([0, 0], [np.inf, np.inf]),
+                            p0=(2e-4, 1e4))
+            tau = fit[0][0]*1e6
+            tauerr = np.sqrt(np.diag(fit[1]))[0]*1e6
+            N = fit[0][1]*10**(np.real(SPR.max())/10)
+            Nerr = np.sqrt(np.diag(fit[1]))[1]*10**(np.real(SPR.max())/10)
+        except RuntimeError:
+            tau,tauerr,N,Nerr = np.ones(4)*np.nan
 
     if plot:
         plt.figure()
@@ -670,7 +680,8 @@ def init_KID(Chipnum,KIDnum,Pread,Tbath,Teffmethod = 'GR',wvl = None,S21 = False
 ######################### PLOT FUNCTIONS ######################## 
 #################################################################
 def plot_spec(Chipnum,KIDlist=None,Pread='all',spec=['cross'],lvlcomp='',clbar=True,
-              del1fNoise=False,delampNoise=False,suboffres=False,Tmin=0,Tmax=500,ax12=None,
+              del1fNoise=False,delampNoise=False,del1fnNoise=False,suboffres=False,
+              Tmin=0,Tmax=500,ax12=None,
              xlim=(None,None),ylim=(None,None)):
     TDparam = get_grTDparam(Chipnum)
     if suboffres:
@@ -725,7 +736,6 @@ def plot_spec(Chipnum,KIDlist=None,Pread='all',spec=['cross'],lvlcomp='',clbar=T
                 Temp = np.intersect1d(Temp,get_grTemp(TDparamoffres,KIDnum,_Pread))
                 
             Temp = Temp[np.logical_and(Temp<Tmax,Temp>Tmin)]
-            Temp = Temp[::-1]
             cmap = matplotlib.cm.get_cmap('viridis')
             norm = matplotlib.colors.Normalize(Temp.min(),Temp.max())
             if clbar:
@@ -735,15 +745,19 @@ def plot_spec(Chipnum,KIDlist=None,Pread='all',spec=['cross'],lvlcomp='',clbar=T
             for i in range(len(Temp)):
                 for (ax2,spec) in zip(range(len(specs)),specs):                 
                     freq,SPR = get_grdata(TDparam,KIDnum,_Pread,Temp[i],spec=spec)
+                    if suboffres:
+                        orfreq,orSPR = get_grdata(TDparamoffres,KIDnum,_Pread,Temp[i],spec=spec)
+                        freq,SPR = subtr_spec(freq,SPR,orfreq,orSPR)
+                        
                     if delampNoise:
                         freq,SPR = del_ampNoise(freq,SPR)
                     if del1fNoise:
                         freq,SPR = del_1fNoise(freq,SPR)
+                    if del1fnNoise:
+                        freq,SPR = del_1fnNoise(freq,SPR)
+                        
                     SPR[SPR==-140] = np.nan
-                    
-                    if suboffres:
-                        orfreq,orSPR = get_grdata(TDparamoffres,KIDnum,_Pread,Temp[i],spec=spec)
-                        freq,SPR = subtr_spec(freq,SPR,orfreq,orSPR)
+
                         
                     if lvlcomp == 'Resp':
                         if spec == 'cross':
@@ -767,8 +781,8 @@ def plot_spec(Chipnum,KIDlist=None,Pread='all',spec=['cross'],lvlcomp='',clbar=T
             fig.tight_layout(rect=(0,0,1,1-.12/len(Preadar)))
                     
                     
-def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,
-                lvlcomp='',delampNoise=True,del1fNoise=True,suboffres=False,relerrthrs=.3,
+def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,lvlcomp='',
+                delampNoise=False,del1fNoise=False,del1fnNoise=False,suboffres=False,relerrthrs=.3,
                 pltKIDsep=True,pltthlvl=False,pltkaplan=False,pltthmfnl=False,
                 fig=None,ax12=None,color='Pread',fmt='-o',label=None,
                 defaulttesc=.14e-3,tescPread='max',tescpltkaplan=False,
@@ -953,13 +967,16 @@ def plot_ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,
             lvlerr = np.zeros((len(Temp)))
             for i in range(len(Temp)):
                 freq,SPR = get_grdata(TDparam,KIDlist[k],Pread,Temp[i],spec)
+                if suboffres:
+                    orfreq,orSPR = get_grdata(TDparamoffres,KIDlist[k],Pread,Temp[i],spec)
+                    freq,SPR = subtr_spec(freq,SPR,orfreq,orSPR)
                 if delampNoise:
                     freq,SPR = del_ampNoise(freq,SPR)
                 if del1fNoise:
                     freq,SPR = del_1fNoise(freq,SPR)
-                if suboffres:
-                    orfreq,orSPR = get_grdata(TDparamoffres,KIDlist[k],Pread,Temp[i],spec)
-                    freq,SPR = subtr_spec(freq,SPR,orfreq,orSPR)
+                if del1fnNoise:
+                    freq,SPR = del_1fnNoise(freq,SPR)
+
                     
                 taut[i],tauterr[i],lvl[i],lvlerr[i] = \
                     tau(freq,SPR,plot=showfit,retfnl=True)
@@ -1299,6 +1316,25 @@ def plot_Qfactorsandf0(Chipnum,KIDnum,Pread=None,fig=None,ax12=None):
     plot_Qfactors(Chipnum,KIDnum,Pread,ax=ax12[0])
     plot_f0(Chipnum,KIDnum,Pread,ax=ax12[1])
     fig.tight_layout(rect=(0,0,1,.9))
+    
+def plot_Powers(Chipnum,KIDnum,Pread=None,ax=None):
+    if Pread is None:
+        Pread = get_S21Pread(Chipnum,KIDnum)[0]
+    if ax is None:
+        fig,ax = plt.subplots()
+    ax.set_title('{}, KID{}, -{} dBm'.format(Chipnum,KIDnum,Pread))
+    S21data = get_S21data(Chipnum,KIDnum,Pread)
+    Q = S21data[:,2]
+    Qc = S21data[:,3]
+    Qi = S21data[:,4]
+    T = S21data[:,1]*1e3
+    ax.plot(T,S21data[:,7],label='$P_{read}$')
+    ax.plot(T,S21data[:,8],label='$P_{int}$')
+    ax.plot(T,10*np.log10(10**(-Pread/10)/2*4*Q**2/(Qi*Qc)),label='$P_{abs}$')
+    ax.set_ylabel('Power (dBm)')
+    ax.set_xlabel('Temperature (mK)')
+    ax.legend()
+    fig.tight_layout()
         
     
     
