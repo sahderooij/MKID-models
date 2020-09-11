@@ -45,14 +45,14 @@ class KID(object):
 
     @property
     def D_0(self):
-        return kidcalc.D(self.kbT, self.N0, self.Vsc, self.kbTD)
+        return kidcalc.D(self.kbT, self.N0, self.kbTc, self.kbTD)
 
     @property  # takes 1.2s to calculate
     def hwread(self):
         return kidcalc.hwread(self.hw0, self.kbT0, self.ak,
                               self.lbd0, self.d, self.D_0,
                               self.D0, self.kbT, self.N0,
-                              self.Vsc, self.kbTD)
+                              self.kbTc, self.kbTD)
 
     @property
     def Nqp_0(self):
@@ -88,7 +88,7 @@ class KID(object):
 
     @property
     def s20(self):
-        D_0 = kidcalc.D(self.kbT0, self.N0, self.Vsc, self.kbTD)
+        D_0 = kidcalc.D(self.kbT0, self.N0, self.kbTc, self.kbTD)
         return kidcalc.cinduct(self.hw0, D_0, self.kbT0)[1]
     
     def fit_epb(self,peakdata,wvl,*args,var='phase'):
@@ -110,7 +110,7 @@ class KID(object):
     def set_Teff(self,eta,P):
         R,V,G_B,G_es,N_w0 = self.calc_params()
         Nqp0 = np.sqrt(V*((1+G_B/G_es)*eta*P/self.D_0+2*G_B*N_w0)/R)
-        self.kbT = kidcalc.kbTeff(Nqp0,self.N0, V, self.Vsc, self.kbTD)
+        self.kbT = kidcalc.kbTeff(Nqp0,self.N0, V, self.kbTc, self.kbTD)
 
 # Calculation functions
     def rateeq(self,N,t,params):
@@ -158,9 +158,9 @@ class KID(object):
         return dNqpt+self.Nqp_0
 
     def calc_S21(self, Nqp, hwread, s20, dhw=0):
-        kbTeff = kidcalc.kbTeff(Nqp, self.N0, self.V, self.Vsc,
+        kbTeff = kidcalc.kbTeff(Nqp, self.N0, self.V, self.kbTc,
                                 self.kbTD)
-        D = kidcalc.D(kbTeff, self.N0, self.Vsc, self.kbTD)
+        D = kidcalc.D(kbTeff, self.N0, self.kbTc, self.kbTD)
         
         s1, s2 = kidcalc.cinduct(hwread + dhw, D, kbTeff)
 
@@ -194,9 +194,9 @@ class KID(object):
         Q = Qi_0*self.Qc/(Qi_0+self.Qc)
         beta = kidcalc.beta(self.lbd0, self.d, D_0, self.D0, self.kbT)
         
-        kbTeff = kidcalc.kbTeff(Nqp, self.N0, self.V, self.Vsc,
+        kbTeff = kidcalc.kbTeff(Nqp, self.N0, self.V, self.kbTc,
                                 self.kbTD)
-        D = kidcalc.D(kbTeff, self.N0, self.Vsc, self.kbTD)
+        D = kidcalc.D(kbTeff, self.N0, self.kbTc, self.kbTD)
         s1, s2 = kidcalc.cinduct(hwread, D, kbTeff)
 
         lindA = self.ak*beta*Q*(s1 - s_0[0])/s_0[1]
@@ -233,7 +233,7 @@ class KID(object):
                 self.calc_resp(Nqpts[i], hwread, s20, D_0)
         return ts, S21, dAtheta
     
-    ##Here come the calc funtions for the noise
+    ##Noise calculation functions
     def calc_respsv(self,plot=False):
         hwread = self.hwread
         s20 = self.s20
@@ -425,9 +425,9 @@ class S21KID(KID):
         return interpolate.splev(self.kbT,self.Qispl,ext=3)
     
     def calc_S21(self, Nqp, hwread, s20, dhw=0):
-        kbTeff = kidcalc.kbTeff(Nqp, self.N0, self.V, self.Vsc,
+        kbTeff = kidcalc.kbTeff(Nqp, self.N0, self.V, self.kbTc,
                                 self.kbTD)
-        D = kidcalc.D(kbTeff, self.N0, self.Vsc, self.kbTD)
+        D = kidcalc.D(kbTeff, self.N0, self.kbTc, self.kbTD)
         
         s1, s2 = kidcalc.cinduct(hwread + dhw, D, kbTeff)
 

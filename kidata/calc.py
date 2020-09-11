@@ -6,7 +6,7 @@ from scipy import integrate
 from scipy.optimize import curve_fit
 from scipy.optimize import minimize_scalar as minisc
 
-from kidcalc import D, beta, cinduct, hwread, hwres, kbTeff, nqp,Vsc
+from kidcalc import D, beta, cinduct, hwread, hwres, kbTeff, nqp
 from kidata import io,filters
 
 def ak(S21data, lbd0=0.092, N0=1.72e4, kbTD=37312.0,plot=False,reterr=False,method='df'):
@@ -19,11 +19,6 @@ def ak(S21data, lbd0=0.092, N0=1.72e4, kbTD=37312.0,plot=False,reterr=False,meth
     d = S21data[0, 25]
     kbTc = S21data[0,21] * 86.17
     D0 = 1.76 * kbTc
-
-    # For D calculation:
-    def integrand1(E, D):
-        return 1 / np.sqrt(E ** 2 - D ** 2)
-    Vsc = 1 / (integrate.quad(integrand1, D0, kbTD, args=(D0,))[0] * N0)
     
     if method == 'df':
         y = (hw - hw0) / hw0
@@ -44,9 +39,9 @@ def ak(S21data, lbd0=0.092, N0=1.72e4, kbTD=37312.0,plot=False,reterr=False,meth
 
     x = np.zeros(len(y))
     i = 0
-    s0 = cinduct(hw0, D(kbT[0], N0, Vsc, kbTD), kbT[0])
+    s0 = cinduct(hw0, D(kbT[0], N0, kbTc, kbTD), kbT[0])
     for kbTi in kbT[mask]:
-        D_0 = D(kbTi, N0, Vsc, kbTD)
+        D_0 = D(kbTi, N0, kbTc, kbTD)
         s = cinduct(hw[i], D_0, kbTi)
         if method == 'df':
             x[i] = (s[1] - s0[1]) / s0[1] * beta(lbd0, d, D_0, D0, kbTi)/4
@@ -159,10 +154,7 @@ def tau_kaplan(T,tesc=.14e-3,
                kbTc = 1.2*86.17,
                kbTD = 37312.0,):
     D0 = 1.76 * kbTc
-    def integrand1(E, D):
-        return 1 / np.sqrt(E ** 2 - D ** 2)
-    Vsc = 1 / (integrate.quad(integrand1, D0, kbTD, args=(D0,))[0] * N0)
-    D_ = D(kb*T, N0, Vsc, kbTD)
+    D_ = D(kb*T, N0, kbTc, kbTD)
     nqp_ = nqp(kb*T, D_, N0)
     taukaplan = t0*N0*kbTc**3/(4*nqp_*D_**2)*(1+tesc/tpb) 
     return taukaplan
@@ -179,14 +171,10 @@ def kbTbeff(S21data,tqpstar,
     kbTc = kb * S21data[0,21]
     D0 = 1.76 * kbTc  # µeV
     V = S21data[0, 14]
-
-    def integrand1(E, D):
-        return 1 / np.sqrt(E ** 2 - D ** 2)
-    Vsc = 1 / (integrate.quad(integrand1, D0, kbTD, args=(D0,))[0] * N0)
     Nqp_0 = V * t0 * N0 * kbTc ** 3 / \
         (2 * D0 ** 2 * tqpstar) * 0.5 * (1 + tesc / tpb)
     
-    return kbTeff(Nqp_0, N0, V, Vsc, kbTD)
+    return kbTeff(Nqp_0, N0, V, kbTc, kbTD)
     
 def _tesc(
     kbT,
@@ -198,9 +186,8 @@ def _tesc(
     kbTD=37312.0
 ):
     '''Calculates the phonon escape time, based on tqp* via Kaplan. Times are in ns.'''
-    Vsc_ = Vsc(kbTc,N0,kbTD)
     
-    D_ = D(kbT, N0, Vsc_, kbTD)
+    D_ = D(kbT,N0,kbTc,kbTD)
     nqp_ = nqp(kbT, D_, N0)
     return tpb*((4*tqpstar*nqp_*D_**2)/(t0*N0*kbTc**3)-1)
 
@@ -242,6 +229,8 @@ def tesc(Chipnum,KIDnum,Pread='max',
         if pltfit:
             plt.title('{} KID{} -{} dBm T={} mK'.format(
                 Chipnum,KIDnum,Pread,Temp[i]))
+            plt.show()
+            plt.close()
             
         if tqpstarerr[i]/tqpstar[i] > relerrthrs or \
         (tqpstar[i] > taunonkaplan or tqpstar[i] < taures) or \
@@ -266,8 +255,9 @@ def tesc(Chipnum,KIDnum,Pread='max',
         plt.errorbar(Temp,tqpstar,yerr=tqpstarerr,capsize=5.,fmt='o')
         mask = ~np.isnan(tescar)
         plt.errorbar(Temp[mask],tqpstar[mask],fmt='o')
-        T,taukaplan = tau_kaplan(np.linspace(Temp[~np.isnan(tqpstar)].min(),
-                   Temp[~np.isnan(tqpstar)].max(),100),tesc=tesc1,kbTc=kbTc)  
+        T = np.linspace(Temp[~np.isnan(tqpstar)].min(),
+                   Temp[~np.isnan(tqpstar)].max(),100)
+        taukaplan = tau_kaplan(T,tesc=tesc1,kbTc=kbTc)  
         plt.plot(T,taukaplan)
         plt.yscale('log')
         plt.ylim(None,1e4)
@@ -294,22 +284,21 @@ def NqpfromQi(S21data,lbd0=0.092,kb=86.17,N0=1.72e4,kbTD=37312.0):
     kbTc = S21data[0,21] * kb
     kbT = S21data[:,1]*kb
     D0 = 1.76 * kbTc
-    Vsc_ = Vsc(kbTc,N0,kbTD)
-    def minfunc(kbT,s2s1,hw,N0,Vsc_,kbTD):
-        D_ = D(kbT,N0,Vsc_,kbTD)
+    def minfunc(kbT,s2s1,hw,N0,kbTc,kbTD):
+        D_ = D(kbT,N0,kbTc,kbTD)
         s1,s2 = cinduct(hw, D_, kbT)
         return np.abs(s2s1-s2/s1)
     Nqp = np.zeros(len(kbT))
     for i in range(len(kbT)):
-        D_0 = D(kbT[i],N0,Vsc_,kbTD)
+        D_0 = D(kbT[i],N0,kbTc,kbTD)
         beta_ = beta(lbd0, d, D_0, D0, kbT[i])
         s2s1 = S21data[i,4]*(ak_*beta_)/2
         res = minisc(minfunc,
-                     args=(s2s1,hw[i],N0,Vsc_,kbTD),
+                     args=(s2s1,hw[i],N0,kbTc,kbTD),
                      bounds = (0,kbTc),
                      method='bounded')
         kbTeff = res.x
-        D_ = D(kbTeff,N0,Vsc_,kbTD)
+        D_ = D(kbTeff,N0,kbTc,kbTD)
         Nqp[i] = S21data[0,14]*nqp(kbTeff,D_,N0)
     return kbT/kb,Nqp
                    

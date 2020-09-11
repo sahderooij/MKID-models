@@ -10,6 +10,8 @@ from kidata import io
 from kidata import calc
 from kidata import filters
 
+import kidcalc
+
 def spec(Chipnum,KIDlist=None,Pread='all',spec=['cross'],lvlcomp='',clbar=True,
               del1fNoise=False,delampNoise=False,del1fnNoise=False,suboffres=False,
               Tmin=0,Tmax=500,ax12=None,
@@ -50,7 +52,7 @@ def spec(Chipnum,KIDlist=None,Pread='all',spec=['cross'],lvlcomp='',clbar=True,
             raise ValueError('{} is not a valid Pread option'.format(Pread))
         if ax12 is None:
             fig,axs = plt.subplots(len(Preadar),len(specs),
-                                   figsize=(6*len(specs),4*len(Preadar)),
+                                   figsize=(5*len(specs),4*len(Preadar)),
                                    sharex=True,sharey=True,squeeze=False)
             fig.suptitle('{}, KID{}'.format(Chipnum,KIDnum))
         else:
@@ -263,14 +265,13 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,lvlcomp
                                       Respspl)*np.sqrt(V),s=0)
             elif lvlcomp == 'RespVtescTc':   
                 kbTc = 86.17*S21data[0,21]
-                Vsc_ = Vsc(kbTc,1.72e4,37312.0)
                 sqrtlvlcompspl = interpolate.splrep(
                     S21data[:,1]*1e3,
                     interpolate.splev(S21data[:,1]*1e3,
                                       Respspl)*\
                     np.sqrt(V*(1+tesc_/.28e-3)*\
                             (kbTc)**3/\
-                            (D(86.17*S21data[:,1],1.72e4,Vsc_,37312.))**2),s=0)
+                            (D(86.17*S21data[:,1],1.72e4,kbTc,37312.))**2),s=0)
             elif lvlcomp == '':
                 sqrtlvlcompspl = interpolate.splrep(
                     S21data[:,1]*1e3,np.ones(len(S21data[:,1])))
@@ -315,7 +316,7 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,lvlcomp
                     plt.title('{}, KID{}, -{} dBm, T={}, {},\n relerr={}'.format(
                         Chipnum,KIDlist[k],Pread,Temp[i],spec,tauterr[i]/taut[i]))
                     plt.xlim(1e-1,1e5)
-                    plt.ylim(-120,-60)
+                    plt.ylim(-120,-50)
                     plt.show()
                     plt.close()
                                 
@@ -472,8 +473,8 @@ def rejspec(Chipnum,KIDnum,sigma,Trange = (0,400),sepT = False, spec='SPR'):
             
 def Qif0(Chipnum,KIDnum,color='Pread',Tmax=.35,pltPread='all'):
     dfld = io.get_datafld()
-    fig,axs = plt.subplots(1,2,figsize=(6.2,2.1))
-    plt.rcParams.update({'font.size':7})
+    fig,axs = plt.subplots(1,2,figsize=(12,4))
+    
     if pltPread == 'all':
         Preadar = np.array(io.get_S21Pread(Chipnum,KIDnum))
     elif type(pltPread) == tuple:
@@ -547,7 +548,6 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         S21Pread = np.array(io.get_S21Pread(Chipnum,KIDnum))
         closestPread = S21Pread[np.abs(S21Pread - Pread).argmin()]
         S21data = io.get_S21data(Chipnum,KIDnum,closestPread)
-        Vsc_ = Vsc(S21data[0,21]*kb,N0,kbTD)
         if closestPread != Pread:
             warnings.warn('S21data at another Pread')
             
@@ -602,11 +602,12 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         T = np.linspace(*ax.get_xlim(),100)
         nqpT = np.zeros(100)
         for i in range(len(T)):
-            D_ = D(kb*T[i]*1e-3, N0, Vsc_, kbTD)
-            nqpT[i] = nqp(kb*T[i]*1e-3, D_, N0)
+            D_ = kidcalc.D(kb*T[i]*1e-3, N0, kb*S21data[0,21], kbTD)
+            nqpT[i] = kidcalc.nqp(kb*T[i]*1e-3, D_, N0)
         ax.plot(T,nqpT,color='k',zorder=len(ax.lines)+1,label='Thermal $n_{qp}$')
         ax.set_ylabel('$n_{qp}$ ($\mu m^{-3}$)')
         ax.set_xlabel('T (mK)')
+        
     if pltThrm or pltNqpQi or pltNqptau:
         ax.legend()
     ax.set_yscale('log')    
