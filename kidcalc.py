@@ -164,5 +164,3 @@ def calc_Nwsg(kbT,V,D,e):
     def integrand(E,kbT,V):
         return 3*V*E**2/(2*np.pi*(6.582e-4)**2*(6.3e3)**3*(np.exp(E/kbT)-1))
     return integrate.quad(integrand,e+D,2*D,args=(kbT,V))[0]
-
-

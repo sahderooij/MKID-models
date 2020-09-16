@@ -43,57 +43,39 @@ def Vsc(kbTc,N0,kbTD):
         return 1/np.sqrt(E**2-D**2)
     return 1/(integrate.quad(integrand1, D0, kbTD,
                                  args=(D0,))[0]*N0)
-def load_Ddata(N0,Vsc,kbTD):
-    if (
-        (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.663743323443183e-06)
-    ):  # speed-up with interpolate
-        Ddata = np.load("../Coding/Ddata_Al_1_2.npy")
-    elif (
-        (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.736267969683833e-06)
-    ):
-        Ddata = np.load("../Coding/Ddata_Al_1_255.npy")
-    elif (
-        (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 1.565803618633812e-05)
-    ):
-        Ddata = np.load("../Coding/Ddata_Al_12.npy")
-    elif (
-        (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.856715467321348e-06)
-    ):
-        Ddata = np.load("../Coding/Ddata_Al_1_35.npy")
-    elif (
-        (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.716702000311747e-06)
-    ):
-        Ddata = np.load("../Coding/Ddata_Al_1_24.npy")
-    elif (
-        (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.55417723118179e-06)
-    ):
-        Ddata = np.load("../Coding/Ddata_Al_1_12.npy")
-    elif (
-        (N0 == 1.72e4) & (kbTD == 37312.0) & (Vsc == 9.729763352867993e-06)
-    ):
-        Ddata = np.load("../Coding/Ddata_Al_1_25.npy")
+def load_Ddata(N0,kbTc,kbTD,kb=86.17):
+    if (N0 == 1.72e4) & (kbTD == 37312.0):  # speed-up with interpolate
+        SC = 'Al'
+        Tc = kbTc/kb
+        try:
+            Ddata = np.load(
+                '../Coding/Ddata_{}_{}.npy'.format(
+                    SC,str(Tc).replace('.','_')))
+        except:
+            Ddata = None
     else:
         Ddata = None
     return Ddata
 
 # Calculation for energy gap D
-def D(kbT, N0, Vsc, kbTD):
-    Ddata = load_Ddata(N0,Vsc,kbTD)
+def D(kbT, N0, kbTc, kbTD,kb=86.17):
+    Ddata = load_Ddata(N0,kbTc,kbTD)
     if Ddata is not None:
         Dspl = interpolate.splrep(Ddata[0, :], Ddata[1, :], s=0)
         return np.clip(interpolate.splev(kbT, Dspl),0,None)
     else:
-        warnings.warn('D takes long.. \n N0={}\n kbTD={}\n Vsc={}'.format(N0,kbTD,Vsc))
-        def integrandD(E, D, kbT, N0, Vsc):
-            return N0 * Vsc * (1 - 2 * f(E, kbT)) / np.sqrt(E ** 2 - D ** 2)
+        warnings.warn('D takes long.. \n N0={}\n kbTD={}\n Tc={}'.format(N0,kbTD,kbTc/kb))
+        _Vsc = Vsc(kbTc,N0,kbTD)
+        def integrandD(E, D, kbT, N0, _Vsc):
+            return N0 * _Vsc * (1 - 2 * f(E, kbT)) / np.sqrt(E ** 2 - D ** 2)
 
-        def dint(D, kbT, N0, Vsc, kbTD):
+        def dint(D, kbT, N0, _Vsc, kbTD):
             return np.abs(
                 integrate.quad(integrandD, D, kbTD,
-                               args=(D, kbT, N0, Vsc))[0] - 1
+                               args=(D, kbT, N0, _Vsc))[0] - 1
             )
 
-        res = minisc(dint, args=(kbT, N0, Vsc, kbTD))
+        res = minisc(dint, args=(kbT, N0, _Vsc, kbTD))
         if res.success:
             return np.clip(res.x,0,None)
 
@@ -104,7 +86,7 @@ def nqp(kbT, D, N0):
     else:
         def integrand(E, kbT, D, N0):
             return 4 * N0 * E / np.sqrt(E ** 2 - D ** 2) * f(E, kbT)
-        if kbT.size is 1 and D.size is 1:#make sure it can deal with kbT,D arrays
+        if kbT.size == 1 and D.size == 1:#make sure it can deal with kbT,D arrays
             return integrate.quad(integrand, D, np.inf, args=(kbT, D, N0))[0]
         else:
             assert (kbT.size == D.size),'kbT and D arrays are not of the same size'
@@ -116,20 +98,19 @@ def nqp(kbT, D, N0):
             
 
 # Calculation for effective temperature
-def kbTeff(N_qp, N0, V, Vsc, kbTD):
-    Ddata = load_Ddata(N0,Vsc,kbTD)
+def kbTeff(N_qp, N0, V, kbTc, kbTD):
+    Ddata = load_Ddata(N0,kbTc,kbTD)
     if Ddata is not None:
         kbTspl = interpolate.splrep(Ddata[2,:],Ddata[0,:])
         return interpolate.splev(N_qp/V,kbTspl)
     else:
-        warnings.warn('kbTeff takes long.. \n N0={}\n kbTD={}\n Vsc={}'.format(N0,kbTD,Vsc))
-        def minfunc(kbT, N_qp, N0, V, Vsc, kbTD):
-            Dt = D(kbT, N0, Vsc, kbTD)
+        def minfunc(kbT, N_qp, N0, V, kbTc, kbTD):
+            Dt = D(kbT, N0, kbTc, kbTD)
             return np.abs(nqp(kbT, Dt, N0) - N_qp/V)
         res = minisc(
             minfunc,
             bounds = (0,1*86.17),
-            args=(N_qp, N0, V, Vsc, kbTD), 
+            args=(N_qp, N0, V, kbTc, kbTD), 
             method="bounded",
             options = {'xatol':1e-15}
         )
@@ -160,8 +141,8 @@ def S21(Qi, Qc, hwread, dhw, hwres):
     return (Q / Qi + 2j * Q * dhw / hwres) / (1 + 2j * Q * dhw / hwres)
 
 # Calculate hwread
-def hwread(hw0, kbT0, ak, lbd0, d, D_, D0, kbT, N0, Vsc, kbTD):
-    D_0 = D(kbT0, N0, Vsc, kbTD)
+def hwread(hw0, kbT0, ak, lbd0, d, D_, D0, kbT, N0, kbTc, kbTD):
+    D_0 = D(kbT0, N0, kbTc, kbTD)
     s20 = cinduct(hw0, D_0, kbT0)[1]
 
     def minfuc(hw, hw0, s20, ak, lbd0, d, D_, D0, kbT):
@@ -183,5 +164,3 @@ def calc_Nwsg(kbT,V,D,e):
     def integrand(E,kbT,V):
         return 3*V*E**2/(2*np.pi*(6.582e-4)**2*(6.3e3)**3*(np.exp(E/kbT)-1))
     return integrate.quad(integrand,e+D,2*D,args=(kbT,V))[0]
-
-

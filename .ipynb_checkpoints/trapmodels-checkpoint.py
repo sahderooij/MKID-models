@@ -1,5 +1,7 @@
 import numpy as np
-import datacalc
+
+from kidata import io, calc, plot
+
 import kidcalc
 import scipy.integrate as integrate
 from scipy import interpolate
@@ -9,30 +11,21 @@ import matplotlib
 import warnings
 
 def get_KIDparam(Chipnum,KIDnum,Pread):
-    kbTD = 37312.
-    N0 = 1.72e4
-    S21data = datacalc.get_S21data(Chipnum,KIDnum,Pread)
+    S21data = io.get_S21data(Chipnum,KIDnum,Pread)
     V = S21data[0,14]
     kbTc = S21data[0,21]*86.17
-    D0 = 1.76*kbTc
-    def integrand1(E, D):
-                return 1/np.sqrt(E**2-D**2)
-    Vsc = 1/(integrate.quad(integrand1, D0, kbTD,
-                                     args=(D0,))[0]*N0)
-    tesc = datacalc.tesc(Chipnum,KIDnum)
-    return V,kbTc,D0,Vsc,tesc
 
+    tesc = calc.tesc(Chipnum,KIDnum)
+    return V,kbTc,tesc
 
 #####################################################################################
 ##################################### Models ########################################
 #####################################################################################
 
 class Model:
-    def __init__(self,V,kbTc,D0,Vsc,tesc):
+    def __init__(self,V,kbTc,tesc):
         self.V = V
         self.kbTc = kbTc
-        self.D0 = D0
-        self.Vsc = Vsc
         self.tesc = tesc
         #Standard constants
         self.N0 = 1.72e4
@@ -41,7 +34,7 @@ class Model:
         self.kbTD = 37312.
         self.kb = 86.17
     
-    def calc_spec(self,lvlcal,*args,startf=1,stopf=1e6,points=100,
+    def calc_spec(self,*args,lvlcal=1,startf=1,stopf=1e6,points=100,
                   retnumrates=False,PSDs='NN'):
         if retnumrates:
             M,B,num,rates = self.calc_MB(*args,retnumrates=True)
@@ -59,24 +52,24 @@ class Model:
 #                 np.linalg.inv(np.eye(len(M))+M/(1j*warr[j])).dot(B))
             if PSDs == 'NN+NNt':
                 sw[j] = (Gw[0,0] + Gw[1,0])
-            elif PSDs is 'NN':
+            elif PSDs == 'NN':
                 sw[j] = Gw[0,0]
-            elif PSDs is 'NtNt':
+            elif PSDs == 'NtNt':
                 sw[j] = Gw[1,1]
-            elif PSDs is 'NNt':
+            elif PSDs == 'NNt':
                 sw[j] = Gw[0,1]
-            elif PSDs is 'NCNC':
+            elif PSDs == 'NCNC':
                 sw[j] = (Gw[0,0] + Gw[1,0] + Gw[0,1] + Gw[1,1])
             else:
                 raise ValueError('{} is not a valid PSDs value'.format(PSDs))
-        swdB = 10*np.log10(sw/lvlcal)
+        swdB = 10*np.log10(sw*1e-6/lvlcal)
         if retnumrates:
             return frqarr,swdB,num,rates
         else:
             return frqarr,swdB
     
     def calc_ltnlvl(self,Tmin,Tmax,
-                    lvlcal,*args,points=50,
+                    *args,points=50,
                     plotspec=False,plotnumrates=False,PSDs='NN'):
         tau = np.full(points,np.nan)
         tauerr = np.full(points,np.nan)
@@ -88,8 +81,7 @@ class Model:
         norm = matplotlib.colors.Normalize(vmin=Temp.min(),vmax=Temp.max())
         for i in range(len(Temp)):
             if plotnumrates:
-                freq,swdB,nums,rates = self.calc_spec(lvlcal,
-                                                      *args,Temp[i]*self.kb,
+                freq,swdB,nums,rates = self.calc_spec(*args,Temp[i]*self.kb,
                                                       retnumrates=True,
                                                       PSDs=PSDs)
                 plt.figure('Nums')
@@ -103,9 +95,9 @@ class Model:
                     plt.plot(Temp[i],val,ratecol.pop(0)+'.')
                 
             else:
-                freq,swdB = self.calc_spec(lvlcal,*args,Temp[i]*self.kb,PSDs=PSDs)
+                freq,swdB = self.calc_spec(*args,Temp[i]*self.kb,PSDs=PSDs)
 
-            tau[i],tauerr[i],lvl[i],lvlerr[i] = datacalc.tau(freq,swdB,
+            tau[i],tauerr[i],lvl[i],lvlerr[i] = calc.tau(freq,swdB,
                                                              plot=False,retfnl=True)
             if plotspec:
                 plt.figure('Spectra')
@@ -144,7 +136,7 @@ class Model:
         Nini = Nss.copy()
         Nini[0] += dNqp
         Nevol = integrate.odeint(self.rateeq,Nini,t,args=(params,))
-        if Nqpnum is 'total':
+        if Nqpnum == 'total':
             Nevol[:,0] += Nevol[:,1]
         return t,Nevol
     
@@ -166,9 +158,9 @@ class Model:
 ####################################Trap Detrap############################################
 
 class TrapDetrap(Model):
-    def __init__(self,V,kbTc,D0,Vsc,tesc):
+    def __init__(self,V,kbTc,tesc):
         self.nrRateEqs = 3
-        super().__init__(V,kbTc,D0,Vsc,tesc)
+        super().__init__(V,kbTc,tesc)
     #Model equations
     def rateeq(self,Ns,t,params):
         N,Nt,Nw = Ns
@@ -185,7 +177,7 @@ class TrapDetrap(Model):
                 [R*N/V,0,-GB-Ges]]
     
     def calc_params(self,Gt,Gd,eta,P,kbT):
-        D = kidcalc.D(kbT,self.N0,self.Vsc,self.kbTD)
+        D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
         NT = kidcalc.nqp(kbT,D,self.N0)*self.V
         R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
         Rstar = R/(1+self.tesc/self.tpb)
@@ -218,10 +210,10 @@ class TrapDetrap(Model):
                                     'Gd':Gd}
         else:
             return M,B
-
+####################################Trap Detrap Kozo#######################################
 class TrapDetrapKozo(TrapDetrap):
     def calc_params(self,e,nrTraps,t1,t2,eta,P,kbT):
-        D = kidcalc.D(kbT,self.N0,self.Vsc,self.kbTD)
+        D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
         NT = kidcalc.nqp(kbT,D,self.N0)*self.V
         R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
         Rstar = R/(1+self.tesc/self.tpb)
@@ -262,9 +254,9 @@ class TrapDetrapKozo(TrapDetrap):
         
 ####################################Trap Detrap Ntmax ########################################
 class TrapDetrapNtmax(Model):
-    def __init__(self,V,kbTc,D0,Vsc,tesc):
+    def __init__(self,V,kbTc,tesc):
         self.nrRateEqs = 3
-        super().__init__(V,kbTc,D0,Vsc,tesc)
+        super().__init__(V,kbTc,tesc)
     #Model equations
     def rateeq(self,Ns,t,params):
         N,Nt,Nw = Ns
@@ -281,7 +273,7 @@ class TrapDetrapNtmax(Model):
                 [R*N/V,0,-GB-Ges]]
     
     def calc_params(self,Gt,Gd,Ntmax,eta,P,kbT):
-        D = kidcalc.D(kbT,self.N0,self.Vsc,self.kbTD)
+        D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
         NT = kidcalc.nqp(kbT,D,self.N0)*self.V
         R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
         Rstar = R/(1+self.tesc/self.tpb)
@@ -311,9 +303,9 @@ class TrapDetrapNtmax(Model):
             return M,B
 ###################################Trap Detrap Rt##########################################
 class TrapDetrapRt(Model):
-    def __init__(self,V,kbTc,D0,Vsc,tesc):
+    def __init__(self,V,kbTc,tesc):
         self.nrRateEqs = 3
-        super().__init__(V,kbTc,D0,Vsc,tesc)
+        super().__init__(V,kbTc,tesc)
         
     #Model Equations
     def rateeq(self,Ns,t,params):
@@ -331,7 +323,7 @@ class TrapDetrapRt(Model):
                 [R*N/V,0,-GB-Ges]]
 
     def calc_params(self,Gt,Gd,Rt,eta,P,kbT):
-        D = kidcalc.D(kbT,self.N0,self.Vsc,self.kbTD)
+        D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
         NT = kidcalc.nqp(kbT,D,self.N0)*self.V
         R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
         Rstar = R/(1+self.tesc/self.tpb)
@@ -374,9 +366,9 @@ class TrapDetrapRt(Model):
             return M,B
 ####################################Trap Detrap Ntmax Rt ####################################
 class TrapDetrapNtmaxRt(Model):
-    def __init__(self,V,kbTc,D0,Vsc,tesc):
+    def __init__(self,V,kbTc,tesc):
         self.nrRateEqs = 3
-        super().__init__(V,kbTc,D0,Vsc,tesc)
+        super().__init__(V,kbTc,tesc)
     #Model equations
     def rateeq(self,Ns,t,params):
         N,Nt,Nw = Ns
@@ -393,7 +385,7 @@ class TrapDetrapNtmaxRt(Model):
                 [R*N/V ,0,-GB-Ges]]
     
     def calc_params(self,Gt,Gd,Ntmax,Rt,eta,P,kbT):
-        D = kidcalc.D(kbT,self.N0,self.Vsc,self.kbTD)
+        D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
         NT = kidcalc.nqp(kbT,D,self.N0)*self.V
         R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
         Rstar = R/(1+self.tesc/self.tpb)
@@ -445,9 +437,9 @@ class TrapDetrapNtmaxRt(Model):
             return M,B
 ####################################Trap Detrap Rt GBsg #################################
 class TrapDetrapRtGBsg(Model):
-    def __init__(self,V,kbTc,D0,Vsc,tesc):
+    def __init__(self,V,kbTc,tesc):
         self.nrRateEqs = 2
-        super().__init__(V,kbTc,D0,Vsc,tesc)
+        super().__init__(V,kbTc,tesc)
     #Model equations
     def rateeq(self,Ns,t,params):
         N,Nt = Ns
@@ -465,7 +457,7 @@ class TrapDetrapRtGBsg(Model):
                  -Rtstar*N/(2*V)-Gd]]
 
     def calc_params(self,Gt,Gd,Rt,GBsg,e,eta,P,kbT):
-        D = kidcalc.D(kbT,self.N0,self.Vsc,self.kbTD)
+        D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
         NT = kidcalc.nqp(kbT,D,self.N0)*self.V
         R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
         Rstar = R/(1+self.tesc/self.tpb)
@@ -510,9 +502,9 @@ class TrapDetrapRtGBsg(Model):
             return M,B
 ####################################Kozorzov############################################
 class Kozorezov(Model):
-    def __init__(self,V,kbTc,D0,Vsc,tesc):
+    def __init__(self,V,kbTc,tesc):
         self.nrRateEqs = 2
-        super().__init__(V,kbTc,D0,Vsc,tesc)
+        super().__init__(V,kbTc,tesc)
     #Model equations
     def rateeq(self,Ns,t,params):
         N,Nt = Ns
@@ -530,7 +522,7 @@ class Kozorezov(Model):
                  -Rtstar*N/(2*V)-Gd]]
     
     def calc_params(self,e,nrTraps,t1,t2,xi,kbT):
-        D = kidcalc.D(kbT,self.N0,self.Vsc,self.kbTD)
+        D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
         c = (nrTraps/self.V/(2*self.N0*D))
         NT = kidcalc.nqp(kbT,D,self.N0)*self.V
         NtT = self.V*2*self.N0*D*c*np.exp(-e/kbT)
@@ -541,10 +533,10 @@ class Kozorezov(Model):
               (1/t1*(3+2*((D-e)/kbT))*kbT/D+4/t2*(1+(D-e)/kbT))
         Gt = 2*c/t2*(1-e/D)*\
             (1/(np.exp((D-e)/kbT)-1)+1)*(1-1/(np.exp(e/kbT)+1))
-        return [Rstar,self.V,NT,NtT,Gt,Gd,Rtstar,D],NT,Rstar
+        return [Rstar,self.V,NT,NtT,Gt,Gd,Rtstar,D]
     
     def calc_MB(self,*args,retnumrates = False):
-        params,NT,Rstar = self.calc_params(*args)
+        params = self.calc_params(*args)
         Rstar,V,NT,NtT,Gt,Gd,Rtstar,D = params
         #Steady state values
         t=0 #dummy var. for rate eq.
@@ -555,19 +547,19 @@ class Kozorezov(Model):
         #M and B matrices
         M = np.array([[Gt+2*Rstar*Nqp0/V+Rtstar*Nt0/(2*V),Rtstar*Nqp0/(2*V)-Gd],
                       [Rtstar*Nt0/(2*V)-Gt,Gd+Rtstar*Nqp0/(2*V)]])
-        B = np.array([[Gt*Nqp0+Gd*Nt0+4*Rstar*Nqp0**2/V+Rtstar*Nqp0*Nt0/V,
+        B = np.array([[Gt*Nqp0+Gd*Nt0+2*Rstar*(Nqp0**2+NT**2)/V+Rtstar*(Nqp0*Nt0+NT*NtT)*Nt0/(2*V),
                        -Gt*Nqp0-Gd*Nt0-Rtstar*Nqp0*Nt0/V],
                       [-Gt*Nqp0-Gd*Nt0-Rtstar*Nqp0*Nt0/V,
-                       Gt*Nqp0+Gd*Nt0+5*Rtstar*Nqp0*Nt0/V]])
+                       Gt*Nqp0+Gd*Nt0+Rtstar*(Nqp0*Nt0+NT*NtT)/(2*V)]])
 
         if retnumrates:
             return M,B,{'NqpT':NT,
                         'Nqp0':Nqp0,
                         'NtT':NtT,
-                        'Nt0':Nt0},{'R*NqpT/2V':Rstar*NT/(2*V),
-                                        'R*Nqp0/2V':Rstar*Nqp0/(2*V),
-                                        'Rt*Nt0/2V':Rtstar*Nt0/(2*V),
-                                        'Gt':Gt,
-                                        'Gd':Gd}
+                        'Nt0':Nt0},{'R*Nqp0/2V':2*Rstar*Nqp0/V,
+                                    'Rt*Nt0/2V':Rtstar*Nt0/(2*V),
+                                    'Rt*Nqp0/2V':Rtstar*Nqp0/(2*V),
+                                    'Gt':Gt,
+                                    'Gd':Gd}
         else:
             return M,B

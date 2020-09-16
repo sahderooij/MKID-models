@@ -257,7 +257,7 @@ def tesc(Chipnum,KIDnum,Pread='max',
         plt.errorbar(Temp[mask],tqpstar[mask],fmt='o')
         T = np.linspace(Temp[~np.isnan(tqpstar)].min(),
                    Temp[~np.isnan(tqpstar)].max(),100)
-        taukaplan = tau_kaplan(T,tesc=tesc1,kbTc=kbTc)  
+        taukaplan = tau_kaplan(T*1e-3,tesc=tesc1,kbTc=kbTc)  
         plt.plot(T,taukaplan)
         plt.yscale('log')
         plt.ylim(None,1e4)

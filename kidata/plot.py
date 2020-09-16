@@ -52,7 +52,7 @@ def spec(Chipnum,KIDlist=None,Pread='all',spec=['cross'],lvlcomp='',clbar=True,
             raise ValueError('{} is not a valid Pread option'.format(Pread))
         if ax12 is None:
             fig,axs = plt.subplots(len(Preadar),len(specs),
-                                   figsize=(5*len(specs),4*len(Preadar)),
+                                   figsize=(4*len(specs),4*len(Preadar)),
                                    sharex=True,sharey=True,squeeze=False)
             fig.suptitle('{}, KID{}'.format(Chipnum,KIDnum))
         else:
@@ -112,6 +112,7 @@ def spec(Chipnum,KIDlist=None,Pread='all',spec=['cross'],lvlcomp='',clbar=True,
             axs[ax1,0].set_ylim(*ylim)
         if ax12 is None:
             fig.tight_layout(rect=(0,0,1,1-.12/len(Preadar)))
+            return fig,axs
                     
                     
 def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,lvlcomp='',
@@ -123,14 +124,14 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,lvlcomp
 
     def _make_fig():
         plt.rcParams.update({'font.size':12})
-        fig, axs = plt.subplots(1,2,figsize=(9,3))
+        fig, axs = plt.subplots(1,2,figsize=(8,3))
         return fig,axs
     def _get_cmap(**kwargs):
         if color == 'Pread':
             cmap = matplotlib.cm.get_cmap('plasma')
             norm = matplotlib.colors.Normalize(-1.1*Preadar.max(),-.9*Preadar.min())
             clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
-            clb.ax.set_title(r'$P_{read}$')
+            clb.ax.set_title(r'$P_{read}$ (dBm)')
         elif color == 'Pint':
             cmap = matplotlib.cm.get_cmap('plasma')
             norm = matplotlib.colors.Normalize(np.array(Pintdict[KIDlist[k]]).min()*1.1,
@@ -380,7 +381,7 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,lvlcomp
                     
         axs[0].set_yscale('log')
         for i in range(2):
-            axs[i].set_xlabel('Temp. (mK)')
+            axs[i].set_xlabel('Temperature (mK)')
         axs[0].set_ylabel(r'$\tau_{qp}^*$ (µs)')
         
         if lvlcomp == 'Resp':
@@ -466,7 +467,7 @@ def rejspec(Chipnum,KIDnum,sigma,Trange = (0,400),sepT = False, spec='SPR'):
             plt.subplot(1,2,2)
             plt.title('Rejection Percentage')
             plt.plot(Tar,percrej)
-            plt.xlabel('T (mK)')
+            plt.xlabel('Temperature (mK)')
             plt.ylabel('%')
             plt.ylim(0,100)
             plt.tight_layout()
@@ -510,6 +511,7 @@ def Qif0(Chipnum,KIDnum,color='Pread',Tmax=.35,pltPread='all'):
     fig.tight_layout()
 
 def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
+        delotherNoise=False,Tmax=500,
              pltThrm=True,pltNqpQi=False,splitT=0,pltNqptau=False,tescPread='max',
              relerrthrs=.4,
              fig=None,ax=None,
@@ -562,10 +564,12 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
                 S21data[:,1]*1e3,S21data[:,10],s=0)
         
         Temp = io.get_grTemp(TDparam,KIDnum,Pread)
+        Temp = Temp[Temp<Tmax]
         Nqp,Nqperr,taut = np.zeros((3,len(Temp)))
         for i in range(len(Temp)):
             freq,SPR = io.get_grdata(TDparam,KIDnum,Pread,Temp[i],spec=spec)
-            freq,SPR = filters.del_otherNoise(freq,SPR)
+            if delotherNoise:
+                freq,SPR = filters.del_otherNoise(freq,SPR)
             taut[i],tauterr,lvl,lvlerr = \
                             calc.tau(freq,SPR,retfnl = True)
             lvl = lvl/interpolate.splev(Temp[i],Respspl)**2
@@ -606,7 +610,7 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
             nqpT[i] = kidcalc.nqp(kb*T[i]*1e-3, D_, N0)
         ax.plot(T,nqpT,color='k',zorder=len(ax.lines)+1,label='Thermal $n_{qp}$')
         ax.set_ylabel('$n_{qp}$ ($\mu m^{-3}$)')
-        ax.set_xlabel('T (mK)')
+        ax.set_xlabel('Temperature (mK)')
         
     if pltThrm or pltNqpQi or pltNqptau:
         ax.legend()
@@ -625,7 +629,7 @@ def Qfactors(Chipnum,KIDnum,Pread=None,ax=None):
     ax.plot(T,S21data[:,4],label='$Q_i$')
     ax.set_yscale('log')
     ax.set_ylabel('Q-factor')
-    ax.set_xlabel('Temp. (mK)')
+    ax.set_xlabel('Temperature (mK)')
     ax.legend()
 
 def f0(Chipnum,KIDnum,Pread,ax=None):
@@ -635,7 +639,7 @@ def f0(Chipnum,KIDnum,Pread,ax=None):
     if ax is None:
         fig,ax = plt.subplots()
     ax.plot(T,S21data[:,5]*1e-9)
-    ax.set_xlabel('Temp. (mK)')
+    ax.set_xlabel('Temperature (mK)')
     ax.set_ylabel('$f_0$ (GHz)')
     ax.ticklabel_format(useOffset=False)
 
