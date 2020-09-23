@@ -10,12 +10,12 @@ import matplotlib.pyplot as plt
 import matplotlib
 import warnings
 
-def get_KIDparam(Chipnum,KIDnum,Pread):
+def get_KIDparam(Chipnum,KIDnum,Pread,plottesc=False,tescPread='max'):
     S21data = io.get_S21data(Chipnum,KIDnum,Pread)
     V = S21data[0,14]
     kbTc = S21data[0,21]*86.17
 
-    tesc = calc.tesc(Chipnum,KIDnum)
+    tesc = calc.tesc(Chipnum,KIDnum,pltkaplan=plottesc,Pread=tescPread)
     return V,kbTc,tesc
 
 #####################################################################################
@@ -69,7 +69,7 @@ class Model:
             return frqarr,swdB
     
     def calc_ltnlvl(self,Tmin,Tmax,
-                    *args,points=50,
+                    *args,points=20,
                     plotspec=False,plotnumrates=False,PSDs='NN'):
         tau = np.full(points,np.nan)
         tauerr = np.full(points,np.nan)
@@ -143,7 +143,7 @@ class Model:
     #plot fuctions
     def plot_ltlvl(self,T,tau,tauerr,lvl,lvlerr,ax1=None,ax2=None,color='b',fmt=''):
         if ax1 is None or ax2 is None:
-            fig,(ax1,ax2)=plt.subplots(1,2,figsize=(12,4))
+            fig,(ax1,ax2)=plt.subplots(1,2,figsize=(8,3))
         mask = np.logical_and(lvl/lvlerr > 2,tau/tauerr > 2)
         ax1.errorbar(T[mask]*1e3,tau[mask],yerr=tauerr[mask],color=color,fmt=fmt)
         ax1.set_yscale('log')
@@ -436,68 +436,61 @@ class TrapDetrapNtmaxRt(Model):
         else:
             return M,B
 ####################################Trap Detrap Rt GBsg #################################
-class TrapDetrapRtGBsg(Model):
+class TrapDetrapRtGBt(Model):
     def __init__(self,V,kbTc,tesc):
         self.nrRateEqs = 2
         super().__init__(V,kbTc,tesc)
     #Model equations
     def rateeq(self,Ns,t,params):
         N,Nt = Ns
-        Rstar,V,NT,NtT,Gt,Gd,Rtstar,eta,P,D = params
+        Rstar,V,NT,NtT,Gt,Gd,Rtstar = params
         return [-Rstar*(N**2-NT**2)/V -Rtstar*(N*Nt-NT*NtT)/(2*V)\
                 -Gt*(N-NT) +Gd*(Nt-NtT),
                 -Rtstar*(N*Nt-NT*NtT)/(2*V) + Gt*(N-NT) - Gd*(Nt-NtT)]
     
     def jac(self,Ns,t,params):
         N,Nt = Ns
-        Rstar,V,NT,NtT,Gt,Gd,Rtstar,eta,P,D = params
+        Rstar,V,NT,NtT,Gt,Gd,Rtstar = params
         return [[-2*Rstar*N/V-Rtstar*Nt/(2*V)-Gt,
                 -Rtstar*N/(2*V)+Gd],
                 [-Rtstar*Nt/(2*V)+Gt,
                  -Rtstar*N/(2*V)-Gd]]
 
-    def calc_params(self,Gt,Gd,Rt,GBsg,e,eta,P,kbT):
+    def calc_params(self,e,nrTraps,Gt,Gd,Rtstar,kbT):
         D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
+        c = (nrTraps/self.V/(2*self.N0*D))
         NT = kidcalc.nqp(kbT,D,self.N0)*self.V
+        NtT = self.V*2*self.N0*D*c*np.exp(-e/kbT)
         R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
         Rstar = R/(1+self.tesc/self.tpb)
-        Ges = 1/self.tesc
-        Gessg = Ges
-        GB = 1/self.tpb
-        NwT = R*NT**2/(2*self.V*GB)
-        NwsgT = kidcalc.calc_Nwsg(kbT,self.V,D,e)
-        return [Rstar,V,NT,NtT,Gt,Gd,Rt,eta,P,D],NT,Rstar
+        return [Rstar,self.V,NT,NtT,Gt,Gd,Rtstar]
     
     def calc_MB(self,*args,retnumrates = False):
-        params,NT,Rstar = self.calc_params(*args)
-        R,V,GB,GBsg,Gt,Gd,Rt,Ges,Gessg,NwT,NwsgT,eta,P,D = params
+        params = self.calc_params(*args)
+        Rstar,V,NT,NtT,Gt,Gd,Rtstar = params
         #Steady state values
         t=0 #dummy var. for rate eq.
-        Nqp0,Nt0,Nw0,Nwsg0 = root(
-            self.rateeq,[NT,NT/2,NwT,NwsgT],args=(t,params),
+        Nqp0,Nt0 = root(
+            self.rateeq,[NT,NtT],args=(t,params),
             tol=1e-12,jac=self.jac,method='hybr').x
 
         #M and B matrices
-        M = np.array([[Gt+2*Rstar*Nqp0/V+Rt*Nt0/(2*V),Rt*Nqp0/(2*V)-Gd],
-                      [Rt*Nt0/(2*V)-Gt,Gd+Rt*Nqp0/(2*V)]])
-        B = np.array([[Gt*Nqp0+Gd*Nt0+4*Rstar*Nqp0**2/V+Rt*Nqp0*Nt0/V,
-                       -Gt*Nqp0-Gd*Nt0-Rt*Nqp0*Nt0/V],
-                      [-Gt*Nqp0-Gd*Nt0-Rt*Nqp0*Nt0/V,
-                       Gt*Nqp0+Gd*Nt0+Rt*Nqp0*Nt0/V]])
+        M = np.array([[Gt+2*Rstar*Nqp0/V+Rtstar*Nt0/(2*V),Rtstar*Nqp0/(2*V)-Gd],
+                      [Rtstar*Nt0/(2*V)-Gt,Gd+Rtstar*Nqp0/(2*V)]])
+        B = np.array([[Gt*Nqp0+Gd*Nt0+2*Rstar*(Nqp0**2+NT**2)/V+Rtstar*(Nqp0*Nt0+NT*NtT)*Nt0/(2*V),
+                       -Gt*Nqp0-Gd*Nt0-Rtstar*Nqp0*Nt0/V],
+                      [-Gt*Nqp0-Gd*Nt0-Rtstar*Nqp0*Nt0/V,
+                       Gt*Nqp0+Gd*Nt0+Rtstar*(Nqp0*Nt0+NT*NtT)/(2*V)]])
 
         if retnumrates:
             return M,B,{'NqpT':NT,
                         'Nqp0':Nqp0,
-                        'Nt0':Nt0,
-                        'Nw0':Nw0,
-                        'NwT':NwT,
-                        'Nwsg0':Nwsg0},{'R*NqpT/2V':R*NT/(2*V),
-                                        'R*Nqp0/2V':R*Nqp0/(2*V),
-                                        'Rt*Nt0/2V':Rt*Nt0/(2*V),
-                                        'Gt':Gt,
-                                        'Gd':Gd,
-                                        'GB':GB,
-                                        'GBsg':GBsg}
+                        'NtT':NtT,
+                        'Nt0':Nt0},{'R*Nqp0/2V':2*Rstar*Nqp0/V,
+                                    'Rt*Nt0/2V':Rtstar*Nt0/(2*V),
+                                    'Rt*Nqp0/2V':Rtstar*Nqp0/(2*V),
+                                    'Gt':Gt,
+                                    'Gd':Gd}
         else:
             return M,B
 ####################################Kozorzov############################################
@@ -508,14 +501,14 @@ class Kozorezov(Model):
     #Model equations
     def rateeq(self,Ns,t,params):
         N,Nt = Ns
-        Rstar,V,NT,NtT,Gt,Gd,Rtstar,D = params
+        Rstar,V,NT,NtT,Gt,Gd,Rtstar = params
         return [-Rstar*(N**2-NT**2)/V -Rtstar*(N*Nt-NT*NtT)/(2*V)\
                 -Gt*(N-NT) +Gd*(Nt-NtT),
                 -Rtstar*(N*Nt-NT*NtT)/(2*V) + Gt*(N-NT) - Gd*(Nt-NtT)]
     
     def jac(self,Ns,t,params):
         N,Nt = Ns
-        Rstar,V,NT,NtT,Gt,Gd,Rtstar,D = params
+        Rstar,V,NT,NtT,Gt,Gd,Rtstar = params
         return [[-2*Rstar*N/V-Rtstar*Nt/(2*V)-Gt,
                 -Rtstar*N/(2*V)+Gd],
                 [-Rtstar*Nt/(2*V)+Gt,
@@ -533,15 +526,15 @@ class Kozorezov(Model):
               (1/t1*(3+2*((D-e)/kbT))*kbT/D+4/t2*(1+(D-e)/kbT))
         Gt = 2*c/t2*(1-e/D)*\
             (1/(np.exp((D-e)/kbT)-1)+1)*(1-1/(np.exp(e/kbT)+1))
-        return [Rstar,self.V,NT,NtT,Gt,Gd,Rtstar,D]
+        return [Rstar,self.V,NT,NtT,Gt,Gd,Rtstar]
     
     def calc_MB(self,*args,retnumrates = False):
         params = self.calc_params(*args)
-        Rstar,V,NT,NtT,Gt,Gd,Rtstar,D = params
+        Rstar,V,NT,NtT,Gt,Gd,Rtstar = params
         #Steady state values
         t=0 #dummy var. for rate eq.
         Nqp0,Nt0 = root(
-            self.rateeq,[NT,NT/2],args=(t,params),
+            self.rateeq,[NT,NtT],args=(t,params),
             tol=1e-12,jac=self.jac,method='hybr').x
 
         #M and B matrices

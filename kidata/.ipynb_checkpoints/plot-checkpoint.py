@@ -110,12 +110,13 @@ def spec(Chipnum,KIDlist=None,Pread='all',spec=['cross'],lvlcomp='',clbar=True,
                     axs[-1,ax2].set_xlabel('Freq. (Hz)')
                     axs[-1,ax2].set_xlim(*xlim)
             axs[ax1,0].set_ylim(*ylim)
-        if ax12 is None:
             fig.tight_layout(rect=(0,0,1,1-.12/len(Preadar)))
-            return fig,axs
+    if ax12 is None and len(KIDlist) == 1:
+        return fig,axs
                     
                     
-def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,lvlcomp='',
+def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startstopf=(None,None),
+           lvlcomp='',
                 delampNoise=False,del1fNoise=False,del1fnNoise=False,suboffres=False,relerrthrs=.3,
                 pltKIDsep=True,pltthlvl=False,pltkaplan=False,pltthmfnl=False,
                 fig=None,ax12=None,color='Pread',fmt='-o',label=None,
@@ -312,7 +313,8 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,lvlcomp
 
                     
                 taut[i],tauterr[i],lvl[i],lvlerr[i] = \
-                    calc.tau(freq,SPR,plot=showfit,retfnl=True)
+                    calc.tau(freq,SPR,plot=showfit,retfnl=True,
+                             startf=startstopf[0],stopf=startstopf[1])
                 if showfit:
                     plt.title('{}, KID{}, -{} dBm, T={}, {},\n relerr={}'.format(
                         Chipnum,KIDlist[k],Pread,Temp[i],spec,tauterr[i]/taut[i]))
@@ -522,6 +524,7 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
     if ax is None or fig is None:
         fig,ax = plt.subplots()
         plt.rcParams.update({'font.size':10})
+        
 
     if pltPread == 'all':
         Preadar = io.get_grPread(TDparam,KIDnum)[::-1]
@@ -614,7 +617,17 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         
     if pltThrm or pltNqpQi or pltNqptau:
         ax.legend()
-    ax.set_yscale('log')    
+    ax.set_yscale('log') 
+    
+    def nqptoNqp(x):
+        return x*S21data[0,14]
+    def Nqptonqp(x):
+        return x/S21data[0,14]
+    
+    ax2 = ax.secondary_yaxis('right', functions=(nqptoNqp,Nqptonqp))
+    ax2.set_ylabel('$N_{qp}$')
+    l,b,w,h = clb.ax.get_position().bounds
+    clb.ax.set_position([l+.12,b,w,h])
     
 def Qfactors(Chipnum,KIDnum,Pread=None,ax=None):
     if Pread is None:
