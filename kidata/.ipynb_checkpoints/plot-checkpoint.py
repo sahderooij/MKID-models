@@ -54,7 +54,6 @@ def spec(Chipnum,KIDlist=None,Pread='all',spec=['cross'],lvlcomp='',clbar=True,
             fig,axs = plt.subplots(len(Preadar),len(specs),
                                    figsize=(4*len(specs),4*len(Preadar)),
                                    sharex=True,sharey=True,squeeze=False)
-            fig.suptitle('{}, KID{}'.format(Chipnum,KIDnum))
         else:
             axs = ax12
         
@@ -120,11 +119,10 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                 delampNoise=False,del1fNoise=False,del1fnNoise=False,suboffres=False,relerrthrs=.3,
                 pltKIDsep=True,pltthlvl=False,pltkaplan=False,pltthmfnl=False,
                 fig=None,ax12=None,color='Pread',fmt='-o',label=None,
-                defaulttesc=.14e-3,tescPread='max',tescpltkaplan=False,
+                defaulttesc=0,tescPread='max',tescpltkaplan=False,
                 showfit=False,savefig=False):
 
     def _make_fig():
-        plt.rcParams.update({'font.size':12})
         fig, axs = plt.subplots(1,2,figsize=(8,3))
         return fig,axs
     def _get_cmap(**kwargs):
@@ -194,8 +192,6 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                                 io.get_grPread(TDparam,KIDlist[k]).min()])
         elif pltPread == 'all':
             Preadar = io.get_grPread(TDparam,KIDlist[k])[::-1]
-        elif type(pltPread) == np.ndarray:
-            Preadar = pltPread
         elif type(pltPread) == list:
             Preadar = np.array(pltPread)
         else:
@@ -513,6 +509,7 @@ def Qif0(Chipnum,KIDnum,color='Pread',Tmax=.35,pltPread='all'):
     fig.tight_layout()
 
 def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
+        startstopf=(None,None),
         delotherNoise=False,Tmax=500,
              pltThrm=True,pltNqpQi=False,splitT=0,pltNqptau=False,tescPread='max',
              relerrthrs=.4,
@@ -522,9 +519,7 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
             kb = 86.17):
     TDparam = io.get_grTDparam(Chipnum)
     if ax is None or fig is None:
-        fig,ax = plt.subplots()
-        plt.rcParams.update({'font.size':10})
-        
+        fig,ax = plt.subplots()       
 
     if pltPread == 'all':
         Preadar = io.get_grPread(TDparam,KIDnum)[::-1]
@@ -574,7 +569,8 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
             if delotherNoise:
                 freq,SPR = filters.del_otherNoise(freq,SPR)
             taut[i],tauterr,lvl,lvlerr = \
-                            calc.tau(freq,SPR,retfnl = True)
+                            calc.tau(freq,SPR,retfnl = True,
+                                     startf=startstopf[0],stopf=startstopf[1])
             lvl = lvl/interpolate.splev(Temp[i],Respspl)**2
             lvlerr = lvlerr/interpolate.splev(Temp[i],Respspl)**2
             Nqp[i] = lvl/(4*taut[i]*1e-6)
@@ -589,34 +585,47 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         elif pltPread == 'max':
             clr = 'gold'
             
-        ax.errorbar(Temp[mask],Nqp[mask]/S21data[0,14],yerr=Nqperr[mask]/S21data[0,14],
-                    color=clr,marker='o',mec='k',capsize=2.)
-        if pltNqpQi:
+        dataline = ax.errorbar(Temp[mask],Nqp[mask]/S21data[0,14],yerr=Nqperr[mask]/S21data[0,14],
+                    color=clr,marker='o',mec='k',capsize=2.,label='cross-PSD')
+        if pltNqptau:
+            nqp_ = calc.nqpfromtau(taut,Chipnum,KIDnum,tescPread=tescPread)
+            tauline, = ax.plot(Temp[mask],nqp_[mask],
+                   color=clr,zorder=len(ax.lines)+1,
+                    label='$\\tau_{qp}^*$')
+    if pltNqpQi:
+        Preadar = io.get_S21Pread(Chipnum,KIDnum)
+        for Pread in Preadar:
+            S21data = io.get_S21data(Chipnum,KIDnum,Pread)
             T,Nqp = calc.NqpfromQi(S21data)
             mask = np.logical_and(T*1e3>ax.get_xlim()[0],T*1e3<ax.get_xlim()[1])
             totalT = T[mask]
             totalNqp = Nqp[mask]
-            ax.plot(totalT[totalT>splitT]*1e3,totalNqp[totalT>splitT]/S21data[0,14],
-                    'g-',zorder=len(ax.lines)+1,label='$n_{qp}$ from $Q_i$')
+            if len(Preadar) == 1:
+                clr = 'g'
+            else:
+                clr = cmap(norm(closestPread))
+            Qline, = ax.plot(totalT[totalT>splitT]*1e3,totalNqp[totalT>splitT]/S21data[0,14],
+                    linestyle='-',color=clr,zorder=len(ax.lines)+1,label='$Q_i$')
             ax.plot(totalT[totalT<splitT]*1e3,totalNqp[totalT<splitT]/S21data[0,14],
-                    'g--',zorder=len(ax.lines)+1)
-        if pltNqptau:
-            nqp_ = calc.nqpfromtau(taut,Chipnum,KIDnum,tescPread=tescPread)
-            ax.plot(Temp[mask],nqp_[mask],
-                   color=clr,zorder=len(ax.lines)+1,
-                    label='$n_{qp}$ from $\\tau_{qp}^*$')
+                    linestyle='--',color=clr,zorder=len(ax.lines)+1)
     if pltThrm:
         T = np.linspace(*ax.get_xlim(),100)
         nqpT = np.zeros(100)
         for i in range(len(T)):
             D_ = kidcalc.D(kb*T[i]*1e-3, N0, kb*S21data[0,21], kbTD)
             nqpT[i] = kidcalc.nqp(kb*T[i]*1e-3, D_, N0)
-        ax.plot(T,nqpT,color='k',zorder=len(ax.lines)+1,label='Thermal $n_{qp}$')
-        ax.set_ylabel('$n_{qp}$ ($\mu m^{-3}$)')
-        ax.set_xlabel('Temperature (mK)')
+        Thline, = ax.plot(T,nqpT,color='k',zorder=len(ax.lines)+1,label='Thermal')
         
-    if pltThrm or pltNqpQi or pltNqptau:
-        ax.legend()
+    lines = ()
+    for line in ['dataline','tauline','Qline','Thline']:
+        if line in locals():
+            lines += (locals()[line],)
+    ax.legend(handles=lines)
+            
+    
+    ax.set_ylabel('$n_{qp}$ ($\\mu m^{-3}$)')
+    ax.set_xlabel('Temperature (mK)')
+
     ax.set_yscale('log') 
     
     def nqptoNqp(x):

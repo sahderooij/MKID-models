@@ -81,7 +81,7 @@ def D(kbT, N0, kbTc, kbTD,kb=86.17):
 
 # Calculation for n_qp
 def nqp(kbT, D, N0):
-    if (kbT<D/20).any():
+    if (kbT<D/20).all():
         return 2*N0*np.sqrt(2*np.pi*kbT*D)*np.exp(-D/kbT)
     else:
         def integrand(E, kbT, D, N0):

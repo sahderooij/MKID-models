@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from scipy import integrate
 from scipy.optimize import curve_fit
 from scipy.optimize import minimize_scalar as minisc
+from scipy.special import k0,i0
 
 from kidcalc import D, beta, cinduct, hwread, hwres, kbTeff, nqp
 from kidata import io,filters
@@ -63,9 +64,9 @@ def ak(S21data, lbd0=0.092, N0=1.72e4, kbTD=37312.0,plot=False,reterr=False,meth
             plt.xlabel(r'$\beta \delta \sigma_1/2\sigma_2 $')
 
     if reterr:
-        return fit[0],np.sqrt(fit[1])
+        return fit[0][0],np.sqrt(fit[1][0])
     else:
-        return fit[0]
+        return fit[0][0]
 
 def tau(freq, SPR, startf = None, stopf = None, plot=False,retfnl = False):
     #Filter non-values
@@ -277,30 +278,47 @@ def get_tescdict(Chipnum,Pread='max'):
         tescdict[KIDnum] = tesc(Chipnum,KIDnum,Pread=Pread)
     return tescdict
 
-def NqpfromQi(S21data,lbd0=0.092,kb=86.17,N0=1.72e4,kbTD=37312.0):
+def NqpfromQi(S21data,uselowtempapprox=True,lbd0=0.092,kb=86.17,N0=1.72e4,kbTD=37312.0):
     ak_ = ak(S21data)
     hw = S21data[:, 5]*2*np.pi*6.582e-4*1e-6
     d = S21data[0, 25]
     kbTc = S21data[0,21] * kb
     kbT = S21data[:,1]*kb
     D0 = 1.76 * kbTc
-    def minfunc(kbT,s2s1,hw,N0,kbTc,kbTD):
-        D_ = D(kbT,N0,kbTc,kbTD)
-        s1,s2 = cinduct(hw, D_, kbT)
-        return np.abs(s2s1-s2/s1)
-    Nqp = np.zeros(len(kbT))
-    for i in range(len(kbT)):
-        D_0 = D(kbT[i],N0,kbTc,kbTD)
-        beta_ = beta(lbd0, d, D_0, D0, kbT[i])
-        s2s1 = S21data[i,4]*(ak_*beta_)/2
-        res = minisc(minfunc,
-                     args=(s2s1,hw[i],N0,kbTc,kbTD),
-                     bounds = (0,kbTc),
-                     method='bounded')
-        kbTeff = res.x
-        D_ = D(kbTeff,N0,kbTc,kbTD)
-        Nqp[i] = S21data[0,14]*nqp(kbTeff,D_,N0)
-    return kbT/kb,Nqp
+    if uselowtempapprox:
+        beta_ = beta(lbd0, d, D0, D0, kbT[0])
+        def minfunc(kbT,s2s1,hw,D0):
+            xi = hw/(2*kbT)
+            return np.abs(np.pi/4*((np.exp(D0/kbT)-2*np.exp(-xi)*i0(xi))/\
+                                   (np.sinh(xi)*k0(xi)))-s2s1)
+        Nqp = np.zeros(len(kbT))
+        for i in range(len(kbT)):
+            s2s1 = S21data[i,4]*(ak_*beta_)/2
+            res = minisc(minfunc,
+                         args=(s2s1,hw[i],D0),
+                         bounds = (0,kbTc),
+                         method='bounded')
+            kbTeff = res.x
+            Nqp[i] = S21data[0,14]*nqp(kbTeff,D0,N0)
+        return kbT/kb,Nqp
+    else:
+        def minfunc(kbT,s2s1,hw,N0,kbTc,kbTD):
+            D_ = D(kbT,N0,kbTc,kbTD)
+            s1,s2 = cinduct(hw, D_, kbT)
+            return np.abs(s2s1-s2/s1)
+        Nqp = np.zeros(len(kbT))
+        for i in range(len(kbT)):
+            D_0 = D(kbT[i],N0,kbTc,kbTD)
+            beta_ = beta(lbd0, d, D_0, D0, kbT[i])
+            s2s1 = S21data[i,4]*(ak_*beta_)/2
+            res = minisc(minfunc,
+                         args=(s2s1,hw[i],N0,kbTc,kbTD),
+                         bounds = (0,kbTc),
+                         method='bounded')
+            kbTeff = res.x
+            D_ = D(kbTeff,N0,kbTc,kbTD)
+            Nqp[i] = S21data[0,14]*nqp(kbTeff,D_,N0)
+        return kbT/kb,Nqp
                    
 def nqpfromtau(tau_,Chipnum,KIDnum,tescPread='max',
                      t0=.44,
