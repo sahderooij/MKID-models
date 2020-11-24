@@ -75,16 +75,16 @@ def tau(freq, SPR, startf = None, stopf = None, plot=False,retfnl = False):
     freq = freq[~np.isnan(SPR)]
     SPR = SPR[~np.isnan(SPR)]
     if stopf is None:
-        bdwth = np.logical_and(freq>3e2,freq<1e4)
+        bdwth = np.logical_and(freq>3e2,freq<5e4)
         try:
-            stopf = freq[bdwth][np.real(SPR[bdwth]).argmin()+1] #+1 to make sure this point is included 
-        except:
-            stopf = 2e4
+            stopf = freq[bdwth][np.real(SPR[bdwth]).argmin()]
+        except ValueError:
+            stopf = 3e4
     if startf is None:
-        startf = 1e1
+        startf = max(10**(np.log10(stopf)-3),1e2)
     
     # fitting a Lorentzian
-    fitmask = np.logical_and(freq > startf, freq < stopf)
+    fitmask = np.logical_and(freq >= startf, freq <= stopf)
     fitfreq = freq[fitmask]
     if len(fitfreq) < 10:
         warnings.warn('Too little points in window to do tau fit.')
@@ -193,7 +193,7 @@ def _tesc(
     return tpb*((4*tqpstar*nqp_*D_**2)/(t0*N0*kbTc**3)-1)
 
 def tesc(Chipnum,KIDnum,Pread='max',
-              minTemp=220,maxTemp=400,taunonkaplan=2e2,taures=1e1,relerrthrs=.2,
+              minTemp=300,maxTemp=400,taunonkaplan=2e3,taures=1e1,relerrthrs=.2,
               pltfit=False,pltkaplan=False,reterr=False,
     t0=.44,
     kb=86.17,
@@ -203,7 +203,6 @@ def tesc(Chipnum,KIDnum,Pread='max',
     defaulttesc=0):
     
     TDparam = io.get_grTDparam(Chipnum)
-    
     if Pread == 'max':
         Pread = io.get_grPread(TDparam,KIDnum).min()
     elif Pread == 'min':
@@ -211,8 +210,10 @@ def tesc(Chipnum,KIDnum,Pread='max',
     elif Pread == 'med':
         Preadarr = io.get_grPread(TDparam,KIDnum)
         Pread = Preadarr[np.abs(Preadarr.mean()-Preadarr).argmin()]
-    elif type(Pread) == int:
-        Pread = np.sort(io.get_grPread(TDparam,KIDnum))[Pread]
+    elif type(Pread) is int:
+        np.sort(io.get_grPread(TDparam,KIDnum))[Pread]
+    elif type(Pread) is np.int32 or type(Pread) is np.uint8:
+        pass
     else:
         raise ValueError('{} not a valid Pread value'.format(Pread))
 
@@ -220,22 +221,22 @@ def tesc(Chipnum,KIDnum,Pread='max',
                        io.get_S21Pread(Chipnum,KIDnum)[0])[0,21]*kb
     
     Temp = io.get_grTemp(TDparam,KIDnum,Pread)
+    Temp = Temp[np.logical_and(Temp<maxTemp,Temp>minTemp)]
     tescar = np.zeros(len(Temp))
     tqpstar = np.zeros(len(Temp))
     tqpstarerr = np.zeros(len(Temp))
     for i in range(len(Temp)):
         freq,SPR = io.get_grdata(TDparam,KIDnum,Pread,Temp[i])
-        freq,SPR = filters.del_otherNoise(freq,SPR)
-        tqpstar[i],tqpstarerr[i] = tau(freq,SPR,stopf=1e5,plot=pltfit)
+        tqpstar[i],tqpstarerr[i] = tau(freq,SPR,plot=pltfit)
         if pltfit:
             plt.title('{} KID{} -{} dBm T={} mK'.format(
                 Chipnum,KIDnum,Pread,Temp[i]))
             plt.show()
             plt.close()
-            
+        
+        
         if tqpstarerr[i]/tqpstar[i] > relerrthrs or \
-        (tqpstar[i] > taunonkaplan or tqpstar[i] < taures) or \
-        (Temp[i] < minTemp or Temp[i] > maxTemp):
+        (tqpstar[i] > taunonkaplan or tqpstar[i] < taures):
             tescar[i] = np.nan
         else:
             tescar[i] = _tesc(kb*Temp[i]*1e-3,tqpstar[i],

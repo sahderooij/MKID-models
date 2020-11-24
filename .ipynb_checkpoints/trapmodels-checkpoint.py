@@ -60,16 +60,18 @@ class Model:
                 sw[j] = Gw[0,1]
             elif PSDs == 'NCNC':
                 sw[j] = (Gw[0,0] + Gw[1,0] + Gw[0,1] + Gw[1,1])
+            elif PSDs == 'N':
+                sw[j] = Gw
             else:
                 raise ValueError('{} is not a valid PSDs value'.format(PSDs))
-        swdB = 10*np.log10(sw*1e-6/lvlcal)
+        swdB = 10*np.log10(sw*1e-6*lvlcal)
         if retnumrates:
             return frqarr,swdB,num,rates
         else:
             return frqarr,swdB
     
     def calc_ltnlvl(self,Tmin,Tmax,
-                    *args,points=20,
+                    *args,lvlcal=1,points=20,
                     plotspec=False,plotnumrates=False,PSDs='NN'):
         tau = np.full(points,np.nan)
         tauerr = np.full(points,np.nan)
@@ -81,7 +83,7 @@ class Model:
         norm = matplotlib.colors.Normalize(vmin=Temp.min(),vmax=Temp.max())
         for i in range(len(Temp)):
             if plotnumrates:
-                freq,swdB,nums,rates = self.calc_spec(*args,Temp[i]*self.kb,
+                freq,swdB,nums,rates = self.calc_spec(*args,Temp[i]*self.kb,lvlcal=lvlcal,
                                                       retnumrates=True,
                                                       PSDs=PSDs)
                 plt.figure('Nums')
@@ -95,7 +97,7 @@ class Model:
                     plt.plot(Temp[i],val,ratecol.pop(0)+'.')
                 
             else:
-                freq,swdB = self.calc_spec(*args,Temp[i]*self.kb,PSDs=PSDs)
+                freq,swdB = self.calc_spec(*args,Temp[i]*self.kb,lvlcal=lvlcal,PSDs=PSDs)
 
             tau[i],tauerr[i],lvl[i],lvlerr[i] = calc.tau(freq,swdB,
                                                              plot=False,retfnl=True)
@@ -141,19 +143,65 @@ class Model:
         return t,Nevol
     
     #plot fuctions
-    def plot_ltlvl(self,T,tau,tauerr,lvl,lvlerr,ax1=None,ax2=None,color='b',fmt=''):
+    def plot_ltlvl(self,T,tau,tauerr,lvl,lvlerr,ax1=None,ax2=None,color='b',fmt='',label=None):
         if ax1 is None or ax2 is None:
             fig,(ax1,ax2)=plt.subplots(1,2,figsize=(8,3))
         mask = np.logical_and(lvl/lvlerr > 2,tau/tauerr > 2)
-        ax1.errorbar(T[mask]*1e3,tau[mask],yerr=tauerr[mask],color=color,fmt=fmt)
+        ax1.errorbar(T[mask]*1e3,tau[mask],yerr=tauerr[mask],color=color,fmt=fmt,label=label)
         ax1.set_yscale('log')
         ax1.set_ylabel(r'Lifetime (µs)')
         ax1.set_xlabel(r'T (mK)')
         ax2.errorbar(T[mask]*1e3,10*np.log10(lvl[mask]),
-        yerr=10*np.log10((lvlerr[mask]+lvl[mask])/lvl[mask]),color=color,fmt=fmt)
+            yerr=10*np.log10((lvlerr[mask]+lvl[mask])/lvl[mask]),color=color,fmt=fmt,label=label)
         ax2.set_ylabel('FNL (dB/Hz)')
         ax2.set_xlabel(r'T (mK)')
+        
+#################################### Rt ##################################################
+class Rt(Model):
+    def __init(self,V,kbTc,tesc):
+        self.nrRateEqs = 1
+        super().__init__(V,kbTc,tesc)
+    
+    def rateeq(self,Ns,t,params):
+        N = Ns
+        Rstar,V,NT,NtT,Rtstar = params
+        return -Rstar*(N**2-NT**2)/V-2*Rtstar*NtT*(N-NT)/V
+    
+    def jac(self,Ns,t,params):
+        N = Ns
+        Rstar,V,NT,NtT,Rtstar = params
+        return -2*Rstar*N/V-2*Rtstar*NtT/V
+    
+    def calc_params(self,e,nrTraps,t1,xi,kbT):
+        D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
+        c = (nrTraps/self.V/(2*self.N0*D))
+        NT = kidcalc.nqp(kbT,D,self.N0)*self.V
+        NtT = self.V*2*self.N0*D*c/kidcalc.f(e,kbT)
+        R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
+        Rstar = R/(1+self.tesc/self.tpb)
+        Rtstar = xi*(1+e/D)/(t1*self.N0*D)
+        return [Rstar,self.V,NT,NtT,Rtstar]
+    
+    def calc_MB(self,*args,retnumrates = False):
+        params = self.calc_params(*args)
+        Rstar,V,NT,NtT,Rtstar = params
+        #Steady state values
+        t=0 #dummy var. for rate eq.
+        Nqp0 = root(
+            self.rateeq,[NT],args=(t,params),
+            tol=1e-12,jac=self.jac,method='hybr').x
 
+        #M and B matrices
+        M = np.array([2*Rstar*Nqp0/V+2*Rtstar*NtT/V])
+        B = np.array([2*Rstar*(Nqp0**2+NT**2)/V+2*Rtstar*NtT*(Nqp0+NT)/V])
+
+        if retnumrates:
+            return M,B,{'NqpT':NT,
+                        'Nqp0':Nqp0,
+                        'NtT':NtT},{'R*Nqp0/2V':Rstar*Nqp0/(2*V),
+                                    'Rt*NtT/2V':Rtstar*NtT/(2*V)}
+        else:
+            return M,B
         
 ####################################Trap Detrap############################################
 
@@ -355,8 +403,7 @@ class TrapDetrapRt(Model):
             return M,B,{
                 'NqpT':NT,
                 'Nqp0':Nqp0,
-                'Nt0':Nt0,
-                'Nw0':Nw0},{
+                'Nt0':Nt0},{
                 'R*NqpT/2V':R*NT/(2*V),
                 'R*Nqp0/2V':R*Nqp0/(2*V),
                 'Rt*Nt0/2V':Rt*Nt0/(2*V),
@@ -436,7 +483,7 @@ class TrapDetrapNtmaxRt(Model):
         else:
             return M,B
 ####################################Trap Detrap Rt GBsg #################################
-class TrapDetrapRtGBt(Model):
+class TrapDetrapRtThrm(Model):
     def __init__(self,V,kbTc,tesc):
         self.nrRateEqs = 2
         super().__init__(V,kbTc,tesc)
@@ -456,13 +503,14 @@ class TrapDetrapRtGBt(Model):
                 [-Rtstar*Nt/(2*V)+Gt,
                  -Rtstar*N/(2*V)-Gd]]
 
-    def calc_params(self,e,nrTraps,Gt,Gd,Rtstar,kbT):
+    def calc_params(self,e,nrTraps,Gt,Gd,xi,kbT):
         D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
         c = (nrTraps/self.V/(2*self.N0*D))
         NT = kidcalc.nqp(kbT,D,self.N0)*self.V
-        NtT = self.V*2*self.N0*D*c*np.exp(-e/kbT)
+        NtT = self.V*2*self.N0*D*c*kidcalc.f(e,kbT)
         R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
         Rstar = R/(1+self.tesc/self.tpb)
+        Rtstar = R*xi
         return [Rstar,self.V,NT,NtT,Gt,Gd,Rtstar]
     
     def calc_MB(self,*args,retnumrates = False):
@@ -486,7 +534,7 @@ class TrapDetrapRtGBt(Model):
             return M,B,{'NqpT':NT,
                         'Nqp0':Nqp0,
                         'NtT':NtT,
-                        'Nt0':Nt0},{'R*Nqp0/2V':2*Rstar*Nqp0/V,
+                        'Nt0':Nt0},{'R*Nqp0/2V':Rstar*Nqp0/(2*V),
                                     'Rt*Nt0/2V':Rtstar*Nt0/(2*V),
                                     'Rt*Nqp0/2V':Rtstar*Nqp0/(2*V),
                                     'Gt':Gt,
@@ -494,31 +542,12 @@ class TrapDetrapRtGBt(Model):
         else:
             return M,B
 ####################################Kozorzov############################################
-class Kozorezov(Model):
-    def __init__(self,V,kbTc,tesc):
-        self.nrRateEqs = 2
-        super().__init__(V,kbTc,tesc)
-    #Model equations
-    def rateeq(self,Ns,t,params):
-        N,Nt = Ns
-        Rstar,V,NT,NtT,Gt,Gd,Rtstar = params
-        return [-Rstar*(N**2-NT**2)/V -Rtstar*(N*Nt-NT*NtT)/(2*V)\
-                -Gt*(N-NT) +Gd*(Nt-NtT),
-                -Rtstar*(N*Nt-NT*NtT)/(2*V) + Gt*(N-NT) - Gd*(Nt-NtT)]
-    
-    def jac(self,Ns,t,params):
-        N,Nt = Ns
-        Rstar,V,NT,NtT,Gt,Gd,Rtstar = params
-        return [[-2*Rstar*N/V-Rtstar*Nt/(2*V)-Gt,
-                -Rtstar*N/(2*V)+Gd],
-                [-Rtstar*Nt/(2*V)+Gt,
-                 -Rtstar*N/(2*V)-Gd]]
-    
+class Kozorezov(TrapDetrapRtThrm):
     def calc_params(self,e,nrTraps,t1,t2,xi,kbT):
         D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
         c = (nrTraps/self.V/(2*self.N0*D))
         NT = kidcalc.nqp(kbT,D,self.N0)*self.V
-        NtT = self.V*2*self.N0*D*c*np.exp(-e/kbT)
+        NtT = self.V*2*self.N0*D*c*kidcalc.f(e,kbT)
         R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
         Rstar = R/(1+self.tesc/self.tpb)
         Rtstar = xi/(t1*self.N0*D)*(1+e/D)
@@ -527,32 +556,21 @@ class Kozorezov(Model):
         Gt = 2*c/t2*(1-e/D)*\
             (1/(np.exp((D-e)/kbT)-1)+1)*(1-1/(np.exp(e/kbT)+1))
         return [Rstar,self.V,NT,NtT,Gt,Gd,Rtstar]
-    
-    def calc_MB(self,*args,retnumrates = False):
-        params = self.calc_params(*args)
-        Rstar,V,NT,NtT,Gt,Gd,Rtstar = params
-        #Steady state values
-        t=0 #dummy var. for rate eq.
-        Nqp0,Nt0 = root(
-            self.rateeq,[NT,NtT],args=(t,params),
-            tol=1e-12,jac=self.jac,method='hybr').x
 
-        #M and B matrices
-        M = np.array([[Gt+2*Rstar*Nqp0/V+Rtstar*Nt0/(2*V),Rtstar*Nqp0/(2*V)-Gd],
-                      [Rtstar*Nt0/(2*V)-Gt,Gd+Rtstar*Nqp0/(2*V)]])
-        B = np.array([[Gt*Nqp0+Gd*Nt0+2*Rstar*(Nqp0**2+NT**2)/V+Rtstar*(Nqp0*Nt0+NT*NtT)*Nt0/(2*V),
-                       -Gt*Nqp0-Gd*Nt0-Rtstar*Nqp0*Nt0/V],
-                      [-Gt*Nqp0-Gd*Nt0-Rtstar*Nqp0*Nt0/V,
-                       Gt*Nqp0+Gd*Nt0+Rtstar*(Nqp0*Nt0+NT*NtT)/(2*V)]])
-
-        if retnumrates:
-            return M,B,{'NqpT':NT,
-                        'Nqp0':Nqp0,
-                        'NtT':NtT,
-                        'Nt0':Nt0},{'R*Nqp0/2V':2*Rstar*Nqp0/V,
-                                    'Rt*Nt0/2V':Rtstar*Nt0/(2*V),
-                                    'Rt*Nqp0/2V':Rtstar*Nqp0/(2*V),
-                                    'Gt':Gt,
-                                    'Gd':Gd}
-        else:
-            return M,B
+####################################Kozorezov with Pread################################
+class KozorezovPread(TrapDetrapRt):
+    def calc_params(self,e,nrTraps,t1,t2,xi,eta,P,kbT):
+        D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
+        c = (nrTraps/self.V/(2*self.N0*D))
+        NT = kidcalc.nqp(kbT,D,self.N0)*self.V
+        R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
+        Rstar = R/(1+self.tesc/self.tpb)
+        Rtstar = xi/(t1*self.N0*D)*(1+e/D)
+        Gd = np.sqrt(np.pi)/4*(kbT/D)**(3/2)*np.exp(-(D-e)/kbT)*\
+              (1/t1*(3+2*((D-e)/kbT))*kbT/D+4/t2*(1+(D-e)/kbT))
+        Gt = 2*c/t2*(1-e/D)*\
+            (1/(np.exp((D-e)/kbT)-1)+1)*(1-1/(np.exp(e/kbT)+1))
+        GB = 1/self.tpb
+        Ges = 1/self.tesc
+        NTw = R*NT**2/(2*self.V*GB)
+        return [R,self.V,GB,Gt,Gd,Rtstar,Ges,NTw,eta,P,D,],NT,Rstar

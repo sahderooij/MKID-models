@@ -44,14 +44,14 @@ def Vsc(kbTc,N0,kbTD):
     return 1/(integrate.quad(integrand1, D0, kbTD,
                                  args=(D0,))[0]*N0)
 def load_Ddata(N0,kbTc,kbTD,kb=86.17):
+    Ddataloc = 'C:/Users/stevendr/Google Drive/SRON/Projects/Coding/'
     if (N0 == 1.72e4) & (kbTD == 37312.0):  # speed-up with interpolate
         SC = 'Al'
-        Tc = kbTc/kb
+        Tc = str(kbTc/kb).replace('.','_')
         try:
-            Ddata = np.load(
-                '../Coding/Ddata_{}_{}.npy'.format(
-                    SC,str(Tc).replace('.','_')))
-        except:
+            Ddata = np.load(Ddataloc + 
+                f'Ddata_{SC}_{Tc}.npy')
+        except FileNotFound:
             Ddata = None
     else:
         Ddata = None

@@ -12,7 +12,35 @@ from kidata import filters
 
 import kidcalc
 
-def spec(Chipnum,KIDlist=None,Pread='all',spec=['cross'],lvlcomp='',clbar=True,
+def _selectPread(pltPread,Preadar):
+    if type(pltPread) is str:
+        if pltPread == 'min':
+            Pread = np.array([Preadar.max()])
+        elif pltPread == 'med':
+            Pread = np.array([Preadar[np.abs(Preadar.mean()-Preadar).argmin()]])
+        elif pltPread == 'max':
+            Pread = np.array([Preadar.min()])
+        elif pltPread == 'minmax':
+            Pread = np.array([Preadar.max(),
+                                Preadar.min()])
+        elif pltPread == 'minmedmax':
+            Pread = np.array([Preadar.max(),
+                                Preadar[np.abs(Preadar.mean()-Preadar).argmin()],
+                                Preadar.min()])
+        elif pltPread == 'all':
+            Pread = Preadar[::-1]
+    elif type(pltPread) == list:
+        Pread = np.array(pltPread)
+    elif type(pltPread) == int:
+        Pread = np.array([np.sort(Preadar)[pltPread]])
+    elif type(pltPread) == np.ndarray:
+        Pread = pltPread
+    else:
+        raise ValueError('{} is not a valid Pread selection'.format(pltPread))
+    return Pread
+    
+
+def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',comptres=False,clbar=True,
               del1fNoise=False,delampNoise=False,del1fnNoise=False,suboffres=False,
               Tmin=0,Tmax=500,ax12=None,
              xlim=(None,None),ylim=(None,None)):
@@ -31,41 +59,23 @@ def spec(Chipnum,KIDlist=None,Pread='all',spec=['cross'],lvlcomp='',clbar=True,
         raise ValueError('Invalid Spectrum Selection')
         
     for KIDnum in KIDlist:
-        allPread = io.get_grPread(TDparam,KIDnum)
-        if Pread == 'min':
-            Preadar = np.array([allPread.max()])
-        elif Pread == 'max':
-            Preadar = np.array([allPread.min()])
-        elif Pread == 'med':
-            Preadarr = io.get_grPread(TDparam,KIDnum)
-            Preadar = np.array([Preadarr[np.abs(Preadarr.mean()-Preadarr).argmin()]])
-        elif Pread == 'minmax':
-            Preadar = [allPread.max(),
-                       allPread.min()]
-        elif Pread == 'all':
-            Preadar = allPread
-        elif type(Pread) == np.ndarray:
-            Preadar = Pread
-        elif type(Pread) == list:
-            Preadar = np.array(Pread)
-        else:
-            raise ValueError('{} is not a valid Pread option'.format(Pread))
+        Preadar = _selectPread(pltPread,io.get_grPread(TDparam,KIDnum))
         if ax12 is None:
             fig,axs = plt.subplots(len(Preadar),len(specs),
                                    figsize=(4*len(specs),4*len(Preadar)),
                                    sharex=True,sharey=True,squeeze=False)
+            fig.suptitle(f'{Chipnum}, KID{KIDnum}')
         else:
             axs = ax12
         
-        for ax1,_Pread in zip(range(len(Preadar)),Preadar):
-            S21Pread = np.array(io.get_S21Pread(Chipnum,KIDnum))
-            closestPread = S21Pread[np.abs(S21Pread - _Pread).argmin()]
-            S21data = io.get_S21data(Chipnum,KIDnum,closestPread)
-            
+        for ax1,Pread in zip(range(len(Preadar)),Preadar):
+            if lvlcomp or comptres:
+                S21data = io.get_S21data(Chipnum,KIDnum,Pread)
+
             axs[ax1,0].set_ylabel('PSD (dBc/Hz)')
-            Temp = io.get_grTemp(TDparam,KIDnum,_Pread)
+            Temp = io.get_grTemp(TDparam,KIDnum,Pread)
             if suboffres:
-                Temp = np.intersect1d(Temp,io.get_grTemp(TDparamoffres,KIDnum,_Pread))
+                Temp = np.intersect1d(Temp,io.get_grTemp(TDparamoffres,KIDnum,Pread))
                 
             Temp = Temp[np.logical_and(Temp<Tmax,Temp>Tmin)]
             cmap = matplotlib.cm.get_cmap('viridis')
@@ -74,11 +84,12 @@ def spec(Chipnum,KIDlist=None,Pread='all',spec=['cross'],lvlcomp='',clbar=True,
                 clb = plt.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap),
                                    ax=axs[ax1,-1])
                 clb.ax.set_title('T (mK)')
+                
             for i in range(len(Temp)):
                 for (ax2,spec) in zip(range(len(specs)),specs):                 
-                    freq,SPR = io.get_grdata(TDparam,KIDnum,_Pread,Temp[i],spec=spec)
+                    freq,SPR = io.get_grdata(TDparam,KIDnum,Pread,Temp[i],spec=spec)
                     if suboffres:
-                        orfreq,orSPR = io.get_grdata(TDparamoffres,KIDnum,_Pread,Temp[i],spec=spec)
+                        orfreq,orSPR = io.get_grdata(TDparamoffres,KIDnum,Pread,Temp[i],spec=spec)
                         freq,SPR = filters.subtr_spec(freq,SPR,orfreq,orSPR)
                         
                     if delampNoise:
@@ -103,22 +114,27 @@ def spec(Chipnum,KIDlist=None,Pread='all',spec=['cross'],lvlcomp='',clbar=True,
                                 S21data[:,1]*1e3,S21data[:,10],s=0)
                         SPR = 10*np.log10(10**(SPR/10)/interpolate.splev(Temp[i],Respspl)**2)
                         
+                    if comptres:
+                        Tind = np.abs(S21data[:,1]-Temp[i]*1e-3).argmin()
+                        SPR = 10*np.log10(10**(SPR/10)*\
+                                          (1+(freq*2*S21data[Tind,2]/S21data[Tind,5])**2))
+                        
                     axs[ax1,ax2].plot(freq,SPR,color=cmap(norm(Temp[i])))
                     axs[ax1,ax2].set_xscale('log')
-                    axs[ax1,ax2].set_title(spec+ ', -{} dBm'.format(_Pread))
+                    axs[ax1,ax2].set_title(spec+ ', -{} dBm'.format(Pread))
                     axs[-1,ax2].set_xlabel('Freq. (Hz)')
                     axs[-1,ax2].set_xlim(*xlim)
             axs[ax1,0].set_ylim(*ylim)
-            fig.tight_layout(rect=(0,0,1,1-.12/len(Preadar)))
+            plt.tight_layout(rect=(0,0,1,1-.12/len(Preadar)))
     if ax12 is None and len(KIDlist) == 1:
         return fig,axs
                     
                     
 def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startstopf=(None,None),
            lvlcomp='',
-                delampNoise=False,del1fNoise=False,del1fnNoise=False,suboffres=False,relerrthrs=.3,
+                delampNoise=False,del1fNoise=False,del1fnNoise=False,suboffres=False,relerrthrs=.2,
                 pltKIDsep=True,pltthlvl=False,pltkaplan=False,pltthmfnl=False,
-                fig=None,ax12=None,color='Pread',fmt='-o',label=None,
+                fig=None,ax12=None,color='Pread',pltclrbar=True,fmt='-o',label=None,
                 defaulttesc=0,tescPread='max',tescpltkaplan=False,
                 showfit=False,savefig=False):
 
@@ -128,24 +144,23 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
     def _get_cmap(**kwargs):
         if color == 'Pread':
             cmap = matplotlib.cm.get_cmap('plasma')
-            norm = matplotlib.colors.Normalize(-1.1*Preadar.max(),-.9*Preadar.min())
+            norm = matplotlib.colors.Normalize(-1.05*kwargs['Preadar'].max(),-.95*kwargs['Preadar'].min())
             clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
             clb.ax.set_title(r'$P_{read}$ (dBm)')
         elif color == 'Pint':
             cmap = matplotlib.cm.get_cmap('plasma')
-            norm = matplotlib.colors.Normalize(np.array(Pintdict[KIDlist[k]]).min()*1.1,
-                                               np.array(Pintdict[KIDlist[k]]).max()*.9)
+            norm = matplotlib.colors.Normalize(kwargs['Pintar'].min()*1.05,kwargs['Pintar'].max()*.95)
             clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
             clb.ax.set_title(r'$P_{int}$ (dBm)')
         elif color == 'V':
             cmap = matplotlib.cm.get_cmap('cividis')
             norm = matplotlib.colors.Normalize(
-                np.array(list(Vdict.values())).min()/.04/.6,
-                np.array(list(Vdict.values())).max()/.04/.6)
+                np.array(list(Vdict.values())).min(),
+                np.array(list(Vdict.values())).max())
             clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
-            clb.ax.set_title(r'Al l. (µm)')
+            clb.ax.set_title(r'Al Vol. ($\mu m^3$)')
         elif color == 'KIDnum':
-            cmap = matplotlib.cm.get_cmap('gist_rainbow')
+            cmap = matplotlib.cm.get_cmap('Paired')
             norm = matplotlib.colors.Normalize(np.array(KIDlist).min(),
                                                np.array(KIDlist).max())
             clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
@@ -157,63 +172,56 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
     TDparam = io.get_grTDparam(Chipnum)
     if suboffres:
         TDparamoffres = io.get_grTDparam(Chipnum,offres=True)
+        
     if KIDlist is None:
         KIDlist = io.get_grKIDs(TDparam)
-    elif type(KIDlist) is float:
+    elif type(KIDlist) is int:
         KIDlist = [KIDlist]
-        
+    
     if color == 'Pint':
         Pintdict = io.get_Pintdict(Chipnum)
-    elif color == 'V':
-        Vdict = io.get_Vdict(Chipnum)
-        
-    if not pltKIDsep and ax12 is None:
-        fig,axs = _make_fig()
-    elif not pltKIDsep:
-        axs = ax12
-        
-    for k in range(len(KIDlist)):
-        if pltPread == 'min':
-            Preadar = np.array([io.get_grPread(TDparam,KIDlist[k]).max()])
-        elif type(pltPread) == int:
-            Preadar = np.array([np.sort(io.get_grPread(TDparam,KIDlist[k]))[pltPread]])
-        elif pltPread == 'med':
-            Preadarr = io.get_grPread(TDparam,KIDlist[k])
-            Preadar = np.array([Preadarr[np.abs(Preadarr.mean()-Preadarr).argmin()]])
-        elif pltPread == 'max':
-            Preadar = np.array([io.get_grPread(TDparam,KIDlist[k]).min()])
-        elif pltPread == 'minmax':
-            Preadar = np.array([io.get_grPread(TDparam,KIDlist[k]).max(),
-                                io.get_grPread(TDparam,KIDlist[k]).min()])
-        elif pltPread == 'minmedmax':
-            Preadarr = io.get_grPread(TDparam,KIDlist[k])
-            Preadar = np.array([io.get_grPread(TDparam,KIDlist[k]).max(),
-                                Preadarr[np.abs(Preadarr.mean()-Preadarr).argmin()],
-                                io.get_grPread(TDparam,KIDlist[k]).min()])
-        elif pltPread == 'all':
-            Preadar = io.get_grPread(TDparam,KIDlist[k])[::-1]
-        elif type(pltPread) == list:
-            Preadar = np.array(pltPread)
-        else:
-            raise ValueError('{} is not a valid Pread selection'.format(pltPread))
-            
-        if pltKIDsep and ax12 is None:
+    
+    if not pltKIDsep:
+        if ax12 is None:
             fig,axs = _make_fig()
+        else:
+            axs = ax12
+        if color == 'Pint':
+            Pintar = np.array([Pintdict[k] for k in KIDlist])
+            cmap,norm = _get_cmap(Pintar=Pintar)
+        elif color == 'V':
+            Vdict = io.get_Vdict(Chipnum)
+            cmap,norm = _get_cmap(Vdict=Vdict)
+        elif color == 'Pread':
+            Preaddict = io.get_Preaddict(Chipnum)
+            Preadar = np.array([Preaddict[k] for k in KIDlist])
             cmap,norm = _get_cmap(Preadar=Preadar)
-            if len(KIDlist) > 1:
-                fig.suptitle('KID{}'.format(KIDlist[k]))
-        elif pltKIDsep:
-            axs=ax12        
+        elif color == 'KIDnum':
+            cmap,norm = _get_cmap(KIDlist=KIDlist)
 
+    for KIDnum in KIDlist:
+        Preadar = _selectPread(pltPread,io.get_grPread(TDparam,KIDnum))
+        if pltKIDsep:
+            if ax12 is None:
+                fig,axs = _make_fig()
+            else:
+                axs = ax12
+                
+            if len(KIDlist) > 1:
+                fig.suptitle(f'KID{KIDnum}')
+            
+            if color == 'Pread':
+                cmap,norm = _get_cmap(Preadar=Preadar)
+            elif color == 'Pint':
+                cmap,norm = _get_cmap(Pintar=np.array(Pintdict[KIDnum]))
+            
         if pltthlvl or 'tesc' in lvlcomp or pltkaplan:
-            tesc_ = calc.tesc(Chipnum,KIDlist[k],
+            tesc_ = calc.tesc(Chipnum,KIDnum,
                          defaulttesc=defaulttesc,
                          relerrthrs=relerrthrs,Pread=tescPread,pltkaplan=tescpltkaplan)
     
         for Pread in Preadar:
-            S21Pread = np.array(io.get_S21Pread(Chipnum,KIDlist[k]))
-            closestPread = S21Pread[np.abs(S21Pread - Pread).argmin()]
-            S21data = io.get_S21data(Chipnum,KIDlist[k],closestPread)
+            S21data = io.get_S21data(Chipnum,KIDnum,Pread)
             if 'ak' in lvlcomp:
                 akin = calc.ak(S21data)
             V = S21data[0,14]
@@ -269,7 +277,7 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                                       Respspl)*\
                     np.sqrt(V*(1+tesc_/.28e-3)*\
                             (kbTc)**3/\
-                            (D(86.17*S21data[:,1],1.72e4,kbTc,37312.))**2),s=0)
+                            (kidcalc.D(86.17*S21data[:,1],1.72e4,kbTc,37312.))**2),s=0)
             elif lvlcomp == '':
                 sqrtlvlcompspl = interpolate.splrep(
                     S21data[:,1]*1e3,np.ones(len(S21data[:,1])))
@@ -282,9 +290,9 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                     lvlcomp))
             
             Pint = 10*np.log10(10**(-1*Pread/10)*S21data[0,2]**2/S21data[0,3]/np.pi)
-            Temp = np.trim_zeros(io.get_grTemp(TDparam,KIDlist[k],Pread))
+            Temp = np.trim_zeros(io.get_grTemp(TDparam,KIDnum,Pread))
             if suboffres:
-                Temp = np.intersect1d(Temp,io.get_grTemp(TDparamoffres,KIDlist[k],Pread))
+                Temp = np.intersect1d(Temp,io.get_grTemp(TDparamoffres,KIDnum,Pread))
                 
             if Tminmax != None:
                 if Tminmax[0] != None:
@@ -296,9 +304,9 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
             lvl = np.zeros((len(Temp)))
             lvlerr = np.zeros((len(Temp)))
             for i in range(len(Temp)):
-                freq,SPR = io.get_grdata(TDparam,KIDlist[k],Pread,Temp[i],spec)
+                freq,SPR = io.get_grdata(TDparam,KIDnum,Pread,Temp[i],spec)
                 if suboffres:
-                    orfreq,orSPR = io.get_grdata(TDparamoffres,KIDlist[k],Pread,Temp[i],spec)
+                    orfreq,orSPR = io.get_grdata(TDparamoffres,KIDnum,Pread,Temp[i],spec)
                     freq,SPR = filters.subtr_spec(freq,SPR,orfreq,orSPR)
                 if delampNoise:
                     freq,SPR = filters.del_ampNoise(freq,SPR)
@@ -313,7 +321,7 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                              startf=startstopf[0],stopf=startstopf[1])
                 if showfit:
                     plt.title('{}, KID{}, -{} dBm, T={}, {},\n relerr={}'.format(
-                        Chipnum,KIDlist[k],Pread,Temp[i],spec,tauterr[i]/taut[i]))
+                        Chipnum,KIDnum,Pread,Temp[i],spec,tauterr[i]/taut[i]))
                     plt.xlim(1e-1,1e5)
                     plt.ylim(-120,-50)
                     plt.show()
@@ -331,33 +339,41 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
             elif color == 'Pint':
                 clr = cmap(norm(Pint))
             elif color == 'V':
-                clr = cmap(norm(Vdict[KIDlist[k]]/.04/.6))
+                clr = cmap(norm(Vdict[KIDnum]))
             elif color == 'KIDnum':
-                clr = cmap(norm(KIDlist[k]))
+                clr = cmap(norm(KIDnum))
             else:
                 clr = color
             
             axs[0].errorbar(Temp[mask],taut[mask],
                                      yerr = tauterr[mask],fmt = fmt,capsize = 3.,
-                              color=clr,mec='k',label=label)
+                              color=clr,mec='k',label=label if Pread == Preadar[-1] else '')
             axs[1].errorbar(Temp[mask],10*np.log10(lvl[mask]),
                                      yerr = 10*np.log10((lvlerr[mask]+lvl[mask])/lvl[mask]),
                                      fmt = fmt, capsize = 3.,color=clr,mec='k',
-                           label=label)
+                           label=label if Pread == Preadar[-1] else '')
             if pltthlvl:
-                Ttemp = np.linspace(Temp[mask].min(),Temp[mask].max(),100)
+                if Tminmax is not None:
+                    Tstartstop = Tminmax
+                else:
+                    Tstartstop = (Temp[mask].min(),Temp[mask].max())
+                Ttemp = np.linspace(*Tstartstop,100)
                 explvl = interpolate.splev(Ttemp,Respspl)**2
                 explvl *= 4*1e-6*.44*S21data[0,14]*1.72e4*(86.17*S21data[0,21])**3/\
                 (2*(S21data[0,15]/1.602e-19*1e6)**2)*(1+tesc_/.28e-3)/2
                 explvl /= interpolate.splev(Ttemp,sqrtlvlcompspl)**2
-                thlvlplot, = axs[1].plot(Ttemp,10*np.log10(explvl),color=clr,linestyle='--',
-                                        label='Theoretical FNL')
-                axs[1].legend((thlvlplot,),(r'FNL from responsivity',))
+                thlvlplot, = axs[1].plot(Ttemp,10*np.log10(explvl),
+                                         color=clr,linestyle='--',linewidth=2.)
+                axs[1].legend((thlvlplot,),(r'Expected noise level',))
                 
             if pltkaplan and Temp[mask].size != 0:
-                T = np.linspace(Temp[mask].min(),Temp[mask].max(),100)*1e-3
+                if Tminmax is not None:
+                    Tstartstop = Tminmax
+                else:
+                    Tstartstop = (Temp[mask].min(),Temp[mask].max())
+                T = np.linspace(*Tstartstop,100)*1e-3
                 taukaplan = calc.tau_kaplan(T,tesc=tesc_,kbTc=86.17*S21data[0,21])
-                kaplanfit, = axs[0].plot(T*1e3,taukaplan,color='k',linestyle='-',linewidth=1.)
+                kaplanfit, = axs[0].plot(T*1e3,taukaplan,color=clr,linestyle='--',linewidth=2.)
                 axs[0].legend((kaplanfit,),('Kaplan',))
                 
             if pltthmfnl:
@@ -372,10 +388,10 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                     thmfnl /= interpolate.splev(T,sqrtlvlcompspl)**2
                     thmfnlplot, = axs[1].plot(T,10*np.log10(thmfnl),color=clr,
                                               linestyle='--',linewidth=3.)
-                    axs[1].legend((thmfnlplot,),('Thermal FNL \n with measured $\\tau_{qp}^*$',))
+                    axs[1].legend((thmfnlplot,),('Thermal Noise Level \n with measured $\\tau_{qp}^*$',))
                 except:
-                    warnings.warn('Could not make Thermal FNL, {},KID{},-{} dBm,{}'.format(
-                    Chipnum,KIDlist[k],Pread,spec))
+                    warnings.warn('Could not make Thermal Noise Level, {},KID{},-{} dBm,{}'.format(
+                    Chipnum,KIDnum,Pread,spec))
                     
         axs[0].set_yscale('log')
         for i in range(2):
@@ -383,20 +399,20 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
         axs[0].set_ylabel(r'$\tau_{qp}^*$ (µs)')
         
         if lvlcomp == 'Resp':
-            axs[1].set_ylabel(r'FNL/$\mathcal{R}^2(T)$ (dB/Hz)')
+            axs[1].set_ylabel(r'Noise Level/$\mathcal{R}^2(T)$ (dB/Hz)')
         elif lvlcomp == 'RespV':            
-            axs[1].set_ylabel(r'FNL/$(\mathcal{R}^2(T)V)$ (dB/Hz)')
+            axs[1].set_ylabel(r'Noise Level/$(\mathcal{R}^2(T)V)$ (dB/Hz)')
         elif lvlcomp == 'RespVtescTc':   
-            axs[1].set_ylabel(r'FNL/$(\mathcal{R}^2(T)\chi)$ (dB/Hz)')   
+            axs[1].set_ylabel(r'Noise Level/$(\mathcal{R}^2(T)\chi)$ (dB/Hz)')   
         elif lvlcomp == '':
-            axs[1].set_ylabel(r'FNL (dB/Hz)')
+            axs[1].set_ylabel(r'Noise Level (dB/Hz)')
         elif lvlcomp == 'RespLowT':
-            axs[1].set_ylabel(r'FNL/$\mathcal{R}^2(T=50 mK)$ (dB/Hz)')
+            axs[1].set_ylabel(r'Noise Level/$\mathcal{R}^2(T=50 mK)$ (dB/Hz)')
         else:
-            axs[1].set_ylabel(r'comp. FNL (dB/Hz)')
+            axs[1].set_ylabel(r'comp. Noise Level (dB/Hz)')
         plt.tight_layout()
         if savefig:
-            plt.savefig('GR_{}_KID{}_{}.pdf'.format(Chipnum,KIDlist[k],spec))
+            plt.savefig('GR_{}_KID{}_{}.pdf'.format(Chipnum,KIDnum,spec))
             plt.close()
     if ax12 is None:
         return fig,axs
@@ -470,14 +486,16 @@ def rejspec(Chipnum,KIDnum,sigma,Trange = (0,400),sepT = False, spec='SPR'):
             plt.ylim(0,100)
             plt.tight_layout()
             
-def Qif0(Chipnum,KIDnum,color='Pread',Tmax=.35,pltPread='all'):
+def Qif0(Chipnum,KIDnum,color='Pread',Tmax=.35,pltPread='all',
+        fig=None,ax12=None):
     dfld = io.get_datafld()
-    fig,axs = plt.subplots(1,2,figsize=(12,4))
+    if fig is None or ax12 is None:
+        fig,axs = plt.subplots(1,2,figsize=(12,4))
+        fig.suptitle(f'{Chipnum}, KID{KIDnum}')
+    else:
+        axs = ax12
     
-    if pltPread == 'all':
-        Preadar = np.array(io.get_S21Pread(Chipnum,KIDnum))
-    elif type(pltPread) == tuple:
-        Preadar = np.array(io.get_S21Pread(Chipnum,KIDnum))[pltPread[0]:pltPread[1]]
+    Preadar = _selectPread(pltPread,io.get_S21Pread(Chipnum,KIDnum))
     if color == 'Pread':   
         cmap = matplotlib.cm.get_cmap('plasma')
         norm = matplotlib.colors.Normalize(-1.05*Preadar.max(),-.95*Preadar.min())
@@ -498,44 +516,29 @@ def Qif0(Chipnum,KIDnum,color='Pread',Tmax=.35,pltPread='all'):
             clr = cmap(norm(Pint[Preadar == Pread][0]))
         T = S21data[:,1]
         axs[0].plot(T[T<Tmax]*1e3,S21data[T<Tmax,4],color=clr)
-        axs[1].plot(T[T<Tmax]*1e3,S21data[T<Tmax,5]*1e-9,color=clr)
+        axs[1].plot(T[T<Tmax]*1e3,(S21data[T<Tmax,5]-S21data[0,5])/S21data[0,5]*1e5,color=clr)
         
     for ax in axs:
         ax.set_xlabel('T (mK)')
         ax.get_yaxis().get_major_formatter().set_useOffset(False)
     axs[0].set_ylabel('$Q_i$')
     axs[0].ticklabel_format(axis='y',style='sci',scilimits=(0,0))
-    axs[1].set_ylabel('$f_0$ (GHz)')
+    axs[1].set_ylabel('$10^5~\delta f_0/f_0$')
     fig.tight_layout()
 
 def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         startstopf=(None,None),
-        delotherNoise=False,Tmax=500,
-             pltThrm=True,pltNqpQi=False,splitT=0,pltNqptau=False,tescPread='max',
-             relerrthrs=.4,
-             fig=None,ax=None,
-            N0 = 1.72e4,
-            kbTD = 37312.0,
-            kb = 86.17):
+        delampNoise=False,del1fNoise=False,del1fnNoise=False,Tmax=500,relerrthrs=.3,
+        pltThrm=True,pltNqpQi=False,splitT=0,pltNqptau=False,tescPread='max',nqpaxis=True,
+        fig=None,ax=None,label=None,clr=None,
+        N0 = 1.72e4,
+        kbTD = 37312.0,
+        kb = 86.17):
     TDparam = io.get_grTDparam(Chipnum)
     if ax is None or fig is None:
         fig,ax = plt.subplots()       
-
-    if pltPread == 'all':
-        Preadar = io.get_grPread(TDparam,KIDnum)[::-1]
-    elif pltPread == 'minmax':
-        Preadar = np.array([io.get_grPread(TDparam,KIDnum).max(),
-                            io.get_grPread(TDparam,KIDnum).min()])
-    elif pltPread == 'min':
-        Preadar = np.array([io.get_grPread(TDparam,KIDnum).max()])
-    elif pltPread == 'max':
-        Preadar = np.array([io.get_grPread(TDparam,KIDnum).min()])
-    elif type(pltPread) == np.ndarray:
-        Preadar = pltPread
-    elif type(pltPread) == list:
-        Preadar = np.array(pltPread)
-    else:
-        raise ValueError('{} is not a valid Pread selection'.format(pltPread))
+    
+    Preadar = _selectPread(pltPread,io.get_grPread(TDparam,KIDnum))
         
     if Preadar.size > 1:
         cmap = matplotlib.cm.get_cmap('plasma')
@@ -545,11 +548,7 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         clb.ax.set_title(r'$P_{read}$ (dBm)')
         
     for Pread in Preadar:
-        S21Pread = np.array(io.get_S21Pread(Chipnum,KIDnum))
-        closestPread = S21Pread[np.abs(S21Pread - Pread).argmin()]
-        S21data = io.get_S21data(Chipnum,KIDnum,closestPread)
-        if closestPread != Pread:
-            warnings.warn('S21data at another Pread')
+        S21data = io.get_S21data(Chipnum,KIDnum,Pread)
             
         if spec == 'cross':
             Respspl = interpolate.splrep(
@@ -566,8 +565,12 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         Nqp,Nqperr,taut = np.zeros((3,len(Temp)))
         for i in range(len(Temp)):
             freq,SPR = io.get_grdata(TDparam,KIDnum,Pread,Temp[i],spec=spec)
-            if delotherNoise:
-                freq,SPR = filters.del_otherNoise(freq,SPR)
+            if delampNoise:
+                freq,SPR = filters.del_ampNoise(freq,SPR)
+            if del1fNoise:
+                freq,SPR = filters.del_1fNoise(freq,SPR)
+            if del1fnNoise:
+                freq,SPR = filters.del_1fnNoise(freq,SPR)
             taut[i],tauterr,lvl,lvlerr = \
                             calc.tau(freq,SPR,retfnl = True,
                                      startf=startstopf[0],stopf=startstopf[1])
@@ -585,11 +588,11 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         elif pltPread == 'max':
             clr = 'gold'
             
-        dataline = ax.errorbar(Temp[mask],Nqp[mask]/S21data[0,14],yerr=Nqperr[mask]/S21data[0,14],
-                    color=clr,marker='o',mec='k',capsize=2.,label='cross-PSD')
+        dataline = ax.errorbar(Temp[mask],Nqp[mask],yerr=Nqperr[mask],
+                    color=clr,marker='o',mec='k',capsize=2.,label=label)
         if pltNqptau:
-            nqp_ = calc.nqpfromtau(taut,Chipnum,KIDnum,tescPread=tescPread)
-            tauline, = ax.plot(Temp[mask],nqp_[mask],
+            Nqp_ = S21data[0,14]*calc.nqpfromtau(taut,Chipnum,KIDnum,tescPread=tescPread)
+            tauline, = ax.plot(Temp[mask],Nqp_[mask],
                    color=clr,zorder=len(ax.lines)+1,
                     label='$\\tau_{qp}^*$')
     if pltNqpQi:
@@ -604,43 +607,40 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
                 clr = 'g'
             else:
                 clr = cmap(norm(closestPread))
-            Qline, = ax.plot(totalT[totalT>splitT]*1e3,totalNqp[totalT>splitT]/S21data[0,14],
+            Qline, = ax.plot(totalT[totalT>splitT]*1e3,totalNqp[totalT>splitT],
                     linestyle='-',color=clr,zorder=len(ax.lines)+1,label='$Q_i$')
-            ax.plot(totalT[totalT<splitT]*1e3,totalNqp[totalT<splitT]/S21data[0,14],
+            ax.plot(totalT[totalT<splitT]*1e3,totalNqp[totalT<splitT],
                     linestyle='--',color=clr,zorder=len(ax.lines)+1)
     if pltThrm:
         T = np.linspace(*ax.get_xlim(),100)
-        nqpT = np.zeros(100)
+        NqpT = np.zeros(100)
         for i in range(len(T)):
             D_ = kidcalc.D(kb*T[i]*1e-3, N0, kb*S21data[0,21], kbTD)
-            nqpT[i] = kidcalc.nqp(kb*T[i]*1e-3, D_, N0)
-        Thline, = ax.plot(T,nqpT,color='k',zorder=len(ax.lines)+1,label='Thermal')
-        
-    lines = ()
-    for line in ['dataline','tauline','Qline','Thline']:
-        if line in locals():
-            lines += (locals()[line],)
-    ax.legend(handles=lines)
-            
+            NqpT[i] = S21data[0,14]*kidcalc.nqp(kb*T[i]*1e-3, D_, N0)
+        Thline, = ax.plot(T,NqpT,color='k',zorder=len(ax.lines)+1,label='Thermal $N_{qp}$')
     
-    ax.set_ylabel('$n_{qp}$ ($\\mu m^{-3}$)')
+    handles, labels = ax.get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    ax.legend(by_label.values(), by_label.keys())         
+    
+    ax.set_ylabel('$N_{qp}$')
     ax.set_xlabel('Temperature (mK)')
 
     ax.set_yscale('log') 
     
-    def nqptoNqp(x):
-        return x*S21data[0,14]
-    def Nqptonqp(x):
-        return x/S21data[0,14]
-    
-    ax2 = ax.secondary_yaxis('right', functions=(nqptoNqp,Nqptonqp))
-    ax2.set_ylabel('$N_{qp}$')
-    l,b,w,h = clb.ax.get_position().bounds
-    clb.ax.set_position([l+.12,b,w,h])
+    if nqpaxis:
+        def nqptoNqp(x):
+            return x*S21data[0,14]
+        def Nqptonqp(x):
+            return x/S21data[0,14]
+
+        ax2 = ax.secondary_yaxis('right', functions=(Nqptonqp,nqptoNqp))
+        ax2.set_ylabel('$n_{qp}$ ($\\mu m^{-3}$)')
+    if Preadar.size > 1:
+        l,b,w,h = clb.ax.get_position().bounds
+        clb.ax.set_position([l+.12,b,w,h])
     
 def Qfactors(Chipnum,KIDnum,Pread=None,ax=None):
-    if Pread is None:
-        Pread = io.get_S21Pread(Chipnum,KIDnum)[0]
     S21data = io.get_S21data(Chipnum,KIDnum,Pread)
     T = S21data[:,1]*1e3
     
@@ -654,7 +654,7 @@ def Qfactors(Chipnum,KIDnum,Pread=None,ax=None):
     ax.set_xlabel('Temperature (mK)')
     ax.legend()
 
-def f0(Chipnum,KIDnum,Pread,ax=None):
+def f0(Chipnum,KIDnum,Pread=None,ax=None):
     S21data = io.get_S21data(Chipnum,KIDnum,Pread)
     T = S21data[:,1]*1e3
     
@@ -666,8 +666,6 @@ def f0(Chipnum,KIDnum,Pread,ax=None):
     ax.ticklabel_format(useOffset=False)
 
 def Qfactorsandf0(Chipnum,KIDnum,Pread=None,fig=None,ax12=None):
-    if Pread is None:
-        Pread = io.get_S21Pread(Chipnum,KIDnum)[0]
     if ax12 is None or fig is None:
         fig,ax12 = plt.subplots(1,2,figsize=(9,3))
     fig.suptitle('{}, KID{}, -{} dBm'.format(Chipnum,KIDnum,Pread))
@@ -676,20 +674,106 @@ def Qfactorsandf0(Chipnum,KIDnum,Pread=None,fig=None,ax12=None):
     fig.tight_layout(rect=(0,0,1,.9))
     
 def Powers(Chipnum,KIDnum,Pread=None,ax=None):
-    if Pread is None:
-        Pread = io.get_S21Pread(Chipnum,KIDnum)[0]
+    S21data = io.get_S21data(Chipnum,KIDnum,Pread)
+
     if ax is None:
         fig,ax = plt.subplots()
-    ax.set_title('{}, KID{}, -{} dBm'.format(Chipnum,KIDnum,Pread))
-    S21data = io.get_S21data(Chipnum,KIDnum,Pread)
+        ax.set_title('{}, KID{}, {} dBm'.format(Chipnum,KIDnum,S21data[0,7]))
     Q = S21data[:,2]
     Qc = S21data[:,3]
     Qi = S21data[:,4]
     T = S21data[:,1]*1e3
     ax.plot(T,S21data[:,7],label='$P_{read}$')
     ax.plot(T,S21data[:,8],label='$P_{int}$')
-    ax.plot(T,10*np.log10(10**(-Pread/10)/2*4*Q**2/(Qi*Qc)),label='$P_{abs}$')
+    ax.plot(T,10*np.log10(10**(S21data[0,7]/10)/2*4*Q**2/(Qi*Qc)),label='$P_{abs}$')
     ax.set_ylabel('Power (dBm)')
     ax.set_xlabel('Temperature (mK)')
     ax.legend()
-    fig.tight_layout()
+
+def PowersvsT(Chipnum,KIDnum,density=False,phnum=False,
+              fig=None,axs=None):
+    if axs is None or fig is None:
+        fig,axs = plt.subplots(1,2,figsize=(10,4))
+    Preadar = io.get_S21Pread(Chipnum,KIDnum)
+    cmap = matplotlib.cm.get_cmap('plasma')
+    norm = matplotlib.colors.Normalize(-1.05*Preadar.max(),-.95*Preadar.min())
+    clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
+    clb.ax.set_title(r'$P_{read}$ (dBm)')
+    for Pread in Preadar:
+        S21data = io.get_S21data(Chipnum,KIDnum,Pread)
+        Q = S21data[:,2]
+        Qc = S21data[:,3]
+        Qi = S21data[:,4]
+        T = S21data[:,1]*1e3
+        Pabs = 10**(S21data[0,7]/10)/2*4*Q**2/(Qi*Qc)*1e-3/1.602e-19
+        Pint = 10**(S21data[:,8]/10)*1e-3/1.602e-19
+        if phnum:
+            Pabs /= 2*np.pi*6.582e-4*(S21data[:,5]*1e-6)**2
+            Pint /= 2*np.pi*6.582e-4*(S21data[:,5]*1e-6)**2
+            
+        if density:
+            Pabs /= S21data[0,14]
+            Pint /= S21data[0,14]
+        axs[1].plot(T,Pabs,color=cmap(norm(-1*Pread)))
+        axs[0].plot(T,Pint,color=cmap(norm(-1*Pread)))
+        
+    title0 = 'Internal Power'
+    title1 = 'Absorbed Power'
+    if phnum:
+        ylabel = '$N_{\gamma}^{res}$'
+    else:
+        ylabel = '$eV~s^{-1}$'
+        
+    if density:
+        ylabel += ' $\mu m^{-3}$'
+        title0 += ' Density'
+        title1 += ' Density'
+
+    axs[0].set_title(title0)
+    axs[1].set_title(title1)
+    axs[0].set_ylabel(ylabel)
+    axs[0].set_yscale('log')
+    axs[1].set_yscale('log')
+    return fig,axs
+    
+    
+def Nphres(Chipnum,KIDnum,Pread=None,ax=None,label=None):
+    S21data = io.get_S21data(Chipnum,KIDnum,Pread)
+
+    if ax is None:
+        fig,ax = plt.subplots()
+        ax.set_title(f'{Chipnum}, KID{KIDnum}, {S21data[0,7]} dBm')
+    
+    
+    T = S21data[:,1]*1e3
+    Pint = S21data[:,8] #dBm
+    hbar = 1.055e-25 #mJ µs
+    w = 2*np.pi*S21data[:,5]*1e-6 #1/µs
+    Nphres = 2*np.pi*10**(Pint/10)/(hbar*w**2)
+
+    ax.plot(T,Nphres,label=label)
+    ax.set_xlabel('Temperature (mK)')
+    ax.set_ylabel('Number of photons')
+    ax.set_yscale('log')
+    
+def Nphabsres(Chipnum,KIDnum,Pread=None,ax=None,label=None):
+    S21data = io.get_S21data(Chipnum,KIDnum,Pread)
+    if ax is None:
+        fig,ax = plt.subplots()
+        ax.set_title(f'{Chipnum}, KID{KIDnum}, {S21data[0,7]} dBm')
+    
+    Q = S21data[:,2]
+    Qc = S21data[:,3]
+    Qi = S21data[:,4]
+    T = S21data[:,1]*1e3
+    Pabs = 10*np.log(10**(S21data[0,7]/10)/2*4*Q**2/(Qi*Qc))
+    
+    hbar = 1.055e-25 #mJ µs
+    w = 2*np.pi*S21data[:,5]*1e-6 #1/µs
+    Nphabsres = 2*np.pi*10**(Pabs/10)/(hbar*w**2)*S21data[0,14]
+
+    ax.plot(T,Nphabsres,label=label)
+#     ax.plot(T,Pabs)
+    ax.set_xlabel('Temperature (mK)')
+    ax.set_ylabel('Absorbed photons per cycle')
+    ax.set_yscale('log')

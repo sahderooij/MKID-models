@@ -6,7 +6,9 @@ import scipy.io
 import glob
 
 def get_datafld():
-    return "D:\\MKIDdata\\"
+    datafld = "D:\\MKIDdata\\"
+    assert glob.glob(datafld), 'data folder not found'
+    return datafld 
 
 def get_S21KIDs(Chipnum):
     datafld = get_datafld()
@@ -22,14 +24,9 @@ def get_S21Pread(Chipnum,KIDnum):
         int(i.split('\\')[-1].split('_')[1][:-3]) 
         for i in glob.glob(S21fld + '\\KID{}_*Tdep.csv'.format(KIDnum))])
 
-def get_S21dat(Chipnum,KIDnum,Pread=None):
-    if Pread is None:
-        Pread = get_S21Pread(Chipnum,KIDnum)[0]
-    #To make faster/less code: read at once and split with '\n\n' and '\n'
-    datafld = get_datafld()
+def read_dat(path):
     datdata = {}
-    with open(datafld + "{}/S21/2D/KID{}_{}dBm_.dat".format(
-                                Chipnum,KIDnum,Pread),'r') as file:
+    with open(path,'r') as file:
         datdata['Header'] = []
         nremptylines = 0
         linenr = 0
@@ -50,19 +47,58 @@ def get_S21dat(Chipnum,KIDnum,Pread=None):
             linenr += 1
             if "Temperature in K" in line:
                 Temp = float(line.replace('Temperature in K:',''))
-                _ = file.readline()
-                firstline = file.readline()
-                linenr += 2
-                datdata['Data'][Temp] = np.fromstring(firstline,sep='\t')
+                nextline = file.readline()
+                linenr += 1 
+                while not nextline[0].isdigit() and nextline[0] != '-':
+                    nextline = file.readline()
+                    linenr += 1
+                datdata['Data'][Temp] = np.fromstring(nextline,sep='\t')
             elif line != '':
                 datdata['Data'][Temp] = np.vstack((datdata['Data'][Temp],np.fromstring(line,sep='\t')))
         
     return datdata
-
-
-def get_S21data(Chipnum, KIDnum, Pread=None):
+    
+def get_S21dat(Chipnum,KIDnum,Pread=None):
     if Pread is None:
         Pread = get_S21Pread(Chipnum,KIDnum)[0]
+    datafld = get_datafld()
+    path = datafld + "{}/S21/2D/KID{}_{}dBm_.dat".format(
+                                Chipnum,KIDnum,Pread)
+    return read_dat(path)
+
+def get_noiseS21dat(Chipnum,KIDnum,Pread=None,dB=True):
+    if Pread is None:
+        Pread = get_grPread(get_grTDparam(Chipnum),KIDnum)[0]
+    datafld = get_datafld()
+    path = datafld + "{}/Noise_vs_T/FFT/2D/KID{}_{}dBm__{}.dat".format(
+                                Chipnum,KIDnum,Pread,'S21dB' if dB else 'S21')
+    return read_dat(path)
+
+def get_noisetddat(Chipnum,KIDnum,Pread=None):
+    if Pread is None:
+        Pread = get_grPread(get_grTDparam(Chipnum),KIDnum)[0]
+    datafld = get_datafld()
+    path = datafld + "{}/Noise_vs_T/FFT/2D/KID{}_{}dBm__td.dat".format(
+                                Chipnum,KIDnum,Pread)
+    return read_dat(path)
+
+def get_noisebin(Chipnum,KIDnum,Pread=None,T=None,freq='med'):
+    if Pread is None:
+        Pread = get_grPread(get_grTDparam(Chipnum),KIDnum)[0]
+    if T is None:
+        T = get_grTemp(get_grTDparam(Chipnum),KIDnum,Pread)[0]
+    datafld = get_datafld()
+    path = datafld + f"{Chipnum}/Noise_vs_T/TD_2D/KID{KIDnum}_{Pread}dBm__TD{freq}_TmK{T}.bin"
+    return np.fromfile(path,dtype='>f8').reshape(-1,2)
+
+def get_S21data(Chipnum, KIDnum, Pread=None):
+    Preadar = get_S21Pread(Chipnum,KIDnum)
+    if Pread is None:
+        Pread = Preadar[0]
+    elif Pread not in Preadar:
+        warnings.warn('No S21data at this Pread. Closest value is selected')
+        Pread = Preadar[np.abs(Preadar - Pread).argmin()]
+    
     datafld = get_datafld()
     S21file = datafld + "\\".join(
         [
@@ -97,6 +133,14 @@ def get_Pintdict(Chipnum):
             Qi = S21data[0,4]
             Pintdict[KIDnum].append(10*np.log10(10**(-1*Pread/10)*Q**2/Qc/np.pi))
     return Pintdict
+
+def get_Preaddict(Chipnum):
+    TDparam = get_grTDparam(Chipnum)
+    KIDlist = get_grKIDs(TDparam)
+    Preaddict = {}
+    for KIDnum in KIDlist:
+        Preaddict[KIDnum] = get_grPread(TDparam,KIDnum)
+    return Preaddict
 
 def get_peakdata(Chipnum,KIDnum, Pread, Tbath, wvlngth, points = 3000):
     datafld = get_datafld()
@@ -137,7 +181,7 @@ def get_grPread(TDparam,KIDnum):
     KIDlist = get_grKIDs(TDparam)
     ind = np.where(KIDlist == KIDnum)[0][0]
     Preadar = TDparam["Pread"][0, ind][:, 0]
-    return Preadar[np.nonzero(Preadar)]
+    return np.array(Preadar[np.nonzero(Preadar)])
     
 def get_grdata(TDparam,KIDnum,Pread,Temp,spec='cross'):
     KIDlist = get_grKIDs(TDparam)
