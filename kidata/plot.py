@@ -42,7 +42,8 @@ def _selectPread(pltPread,Preadar):
 
 def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',comptres=False,clbar=True,
               del1fNoise=False,delampNoise=False,del1fnNoise=False,suboffres=False,
-              Tmin=0,Tmax=500,ax12=None,
+              plttres=False,
+              Tminmax=(0,500),ax12=None,
              xlim=(None,None),ylim=(None,None)):
     TDparam = io.get_grTDparam(Chipnum)
     if suboffres:
@@ -69,7 +70,7 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',comptres=
             axs = ax12
         
         for ax1,Pread in zip(range(len(Preadar)),Preadar):
-            if lvlcomp or comptres:
+            if lvlcomp or comptres or plttres:
                 S21data = io.get_S21data(Chipnum,KIDnum,Pread)
 
             axs[ax1,0].set_ylabel('PSD (dBc/Hz)')
@@ -77,7 +78,7 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',comptres=
             if suboffres:
                 Temp = np.intersect1d(Temp,io.get_grTemp(TDparamoffres,KIDnum,Pread))
                 
-            Temp = Temp[np.logical_and(Temp<Tmax,Temp>Tmin)]
+            Temp = Temp[np.logical_and(Temp<Tminmax[1],Temp>Tminmax[0])]
             cmap = matplotlib.cm.get_cmap('viridis')
             norm = matplotlib.colors.Normalize(Temp.min(),Temp.max())
             if clbar:
@@ -117,13 +118,24 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',comptres=
                     if comptres:
                         Tind = np.abs(S21data[:,1]-Temp[i]*1e-3).argmin()
                         SPR = 10*np.log10(10**(SPR/10)*\
-                                          (1+(freq*2*S21data[Tind,2]/S21data[Tind,5])**2))
+                                          (1+(freq*2*S21data[Tind,2]/S21data[Tind,5])**2))                        
                         
                     axs[ax1,ax2].plot(freq,SPR,color=cmap(norm(Temp[i])))
                     axs[ax1,ax2].set_xscale('log')
                     axs[ax1,ax2].set_title(spec+ ', -{} dBm'.format(Pread))
                     axs[-1,ax2].set_xlabel('Freq. (Hz)')
                     axs[-1,ax2].set_xlim(*xlim)
+                    
+                    if plttres:
+                        Tind = np.abs(S21data[:,1]-Temp[i]*1e-3).argmin()
+                        axs[ax1,ax2].annotate('',(S21data[Tind,5]/(2*S21data[Tind,2]),
+                                                  ylim[1]),
+                                              (S21data[Tind,5]/(2*S21data[Tind,2]),
+                                                  ylim[1]+10),
+                                             arrowprops=dict(arrowstyle='->',color=cmap(norm(Temp[i]))),
+                                             annotation_clip=False)
+                        
+
             axs[ax1,0].set_ylim(*ylim)
             plt.tight_layout(rect=(0,0,1,1-.12/len(Preadar)))
     if ax12 is None and len(KIDlist) == 1:
@@ -133,7 +145,7 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',comptres=
 def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startstopf=(None,None),
            lvlcomp='',
                 delampNoise=False,del1fNoise=False,del1fnNoise=False,suboffres=False,relerrthrs=.2,
-                pltKIDsep=True,pltthlvl=False,pltkaplan=False,pltthmfnl=False,
+                pltKIDsep=True,pltthlvl=False,pltkaplan=False,pltthmfnl=False,plttres=False,
                 fig=None,ax12=None,color='Pread',pltclrbar=True,fmt='-o',label=None,
                 defaulttesc=0,tescPread='max',tescpltkaplan=False,
                 showfit=False,savefig=False):
@@ -221,76 +233,83 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                          relerrthrs=relerrthrs,Pread=tescPread,pltkaplan=tescpltkaplan)
     
         for Pread in Preadar:
-            S21data = io.get_S21data(Chipnum,KIDnum,Pread)
-            if 'ak' in lvlcomp:
-                akin = calc.ak(S21data)
-            V = S21data[0,14]
-            if spec == 'cross':
-                Respspl = interpolate.splrep(
-                    S21data[:,1]*1e3,np.sqrt(S21data[:,10]*S21data[:,18]),s=0)
-            elif spec == 'amp':
-                Respspl = interpolate.splrep(
-                    S21data[:,1]*1e3,S21data[:,18],s=0)
-            elif spec == 'phase':
-                Respspl = interpolate.splrep(
-                    S21data[:,1]*1e3,S21data[:,10],s=0)
-
-            if lvlcomp == 'QakV':
-                sqrtlvlcompspl = interpolate.splrep(
-                    S21data[:,1]*1e3,
-                    S21data[:,2]*akin/V,s=0)
-            elif lvlcomp == 'QaksqrtV': 
-                sqrtlvlcompspl = interpolate.splrep(
-                    S21data[:,1]*1e3,
-                    S21data[:,2]*akin/np.sqrt(V),s=0)
-            elif lvlcomp == 'QaksqrtVtesc':
-                sqrtlvlcompspl = interpolate.splrep(
-                    S21data[:,1]*1e3,
-                    S21data[:,2]*akin/np.sqrt(V*\
-                                              (1+tesc_/.28e-3)),s=0)
-            elif lvlcomp == 'QaksqrtVtescTc':
-                sqrtlvlcompspl = interpolate.splrep(
-                    S21data[:,1]*1e3,
-                    S21data[:,2]*akin/np.sqrt(V*\
-                                               (1+tesc_/.28e-3)*\
-                                            (86.17*S21data[0,21])**3/\
-                                               (S21data[0,15]/1.6e-19*1e6)**2),s=0)
-            elif lvlcomp == 'Resp':            
-                sqrtlvlcompspl = Respspl
-            elif lvlcomp == 'RespPint':
-                Pint = 10**(-Pread/10)*S21data[:,2]**2/(S21data[:,3]*np.pi)
-                Pint /= Pint[0]
-                sqrtlvlcompspl = interpolate.splrep(
-                    S21data[:,1]*1e3,
-                    interpolate.splev(S21data[:,1]*1e3,
-                                      Respspl)/Pint**(1/4),s=0)
-            elif lvlcomp == 'RespV':            
-                sqrtlvlcompspl = interpolate.splrep(
-                    S21data[:,1]*1e3,
-                    interpolate.splev(S21data[:,1]*1e3,
-                                      Respspl)*np.sqrt(V),s=0)
-            elif lvlcomp == 'RespVtescTc':   
-                kbTc = 86.17*S21data[0,21]
-                sqrtlvlcompspl = interpolate.splrep(
-                    S21data[:,1]*1e3,
-                    interpolate.splev(S21data[:,1]*1e3,
-                                      Respspl)*\
-                    np.sqrt(V*(1+tesc_/.28e-3)*\
-                            (kbTc)**3/\
-                            (kidcalc.D(86.17*S21data[:,1],1.72e4,kbTc,37312.))**2),s=0)
-            elif lvlcomp == '':
-                sqrtlvlcompspl = interpolate.splrep(
-                    S21data[:,1]*1e3,np.ones(len(S21data[:,1])))
-            elif lvlcomp == 'RespLowT':
-                sqrtlvlcompspl = interpolate.splrep(
-                    S21data[:,1]*1e3,np.ones(len(S21data[:,1]))*\
-                interpolate.splev(S21data[0,1]*1e3,Respspl))
-            else:
-                raise ValueError('{} is an invalid compensation method'.format(
-                    lvlcomp))
-            
-            Pint = 10*np.log10(10**(-1*Pread/10)*S21data[0,2]**2/S21data[0,3]/np.pi)
             Temp = np.trim_zeros(io.get_grTemp(TDparam,KIDnum,Pread))
+            if lvlcomp != '':
+                
+                S21data = io.get_S21data(Chipnum,KIDnum,Pread)
+                if 'ak' in lvlcomp:
+                    akin = calc.ak(S21data)
+                V = S21data[0,14]
+                if spec == 'cross':
+                    Respspl = interpolate.splrep(
+                        S21data[:,1]*1e3,np.sqrt(S21data[:,10]*S21data[:,18]),s=0)
+                elif spec == 'amp':
+                    Respspl = interpolate.splrep(
+                        S21data[:,1]*1e3,S21data[:,18],s=0)
+                elif spec == 'phase':
+                    Respspl = interpolate.splrep(
+                        S21data[:,1]*1e3,S21data[:,10],s=0)
+
+                if lvlcomp == 'QakV':
+                    sqrtlvlcompspl = interpolate.splrep(
+                        S21data[:,1]*1e3,
+                        S21data[:,2]*akin/V,s=0)
+                elif lvlcomp == 'QaksqrtV': 
+                    sqrtlvlcompspl = interpolate.splrep(
+                        S21data[:,1]*1e3,
+                        S21data[:,2]*akin/np.sqrt(V),s=0)
+                elif lvlcomp == 'QaksqrtVtesc':
+                    sqrtlvlcompspl = interpolate.splrep(
+                        S21data[:,1]*1e3,
+                        S21data[:,2]*akin/np.sqrt(V*\
+                                                  (1+tesc_/.28e-3)),s=0)
+                elif lvlcomp == 'QaksqrtVtescTc':
+                    sqrtlvlcompspl = interpolate.splrep(
+                        S21data[:,1]*1e3,
+                        S21data[:,2]*akin/np.sqrt(V*\
+                                                   (1+tesc_/.28e-3)*\
+                                                (86.17*S21data[0,21])**3/\
+                                                   (S21data[0,15]/1.6e-19*1e6)**2),s=0)
+                elif lvlcomp == 'Resp':            
+                    sqrtlvlcompspl = Respspl
+                elif lvlcomp == 'RespPint':
+                    Pint = 10**(-Pread/10)*S21data[:,2]**2/(S21data[:,3]*np.pi)
+                    Pint /= Pint[0]
+                    sqrtlvlcompspl = interpolate.splrep(
+                        S21data[:,1]*1e3,
+                        interpolate.splev(S21data[:,1]*1e3,
+                                          Respspl)/Pint**(1/4),s=0)
+                elif lvlcomp == 'RespV':            
+                    sqrtlvlcompspl = interpolate.splrep(
+                        S21data[:,1]*1e3,
+                        interpolate.splev(S21data[:,1]*1e3,
+                                          Respspl)*np.sqrt(V),s=0)
+                elif lvlcomp == 'RespVtescTc':   
+                    kbTc = 86.17*S21data[0,21]
+                    sqrtlvlcompspl = interpolate.splrep(
+                        S21data[:,1]*1e3,
+                        interpolate.splev(S21data[:,1]*1e3,
+                                          Respspl)*\
+                        np.sqrt(V*(1+tesc_/.28e-3)*\
+                                (kbTc)**3/\
+                                (kidcalc.D(86.17*S21data[:,1],1.72e4,kbTc,37312.))**2),s=0)
+                elif lvlcomp == '':
+                    sqrtlvlcompspl = interpolate.splrep(
+                        S21data[:,1]*1e3,np.ones(len(S21data[:,1])))
+                elif lvlcomp == 'RespLowT':
+                    sqrtlvlcompspl = interpolate.splrep(
+                        S21data[:,1]*1e3,np.ones(len(S21data[:,1]))*\
+                    interpolate.splev(S21data[0,1]*1e3,Respspl))
+                else:
+                    raise ValueError('{} is an invalid compensation method'.format(
+                        lvlcomp))
+
+                Pint = 10*np.log10(10**(-1*Pread/10)*S21data[0,2]**2/S21data[0,3]/np.pi)
+            else:
+                sqrtlvlcompspl = interpolate.splrep(
+                        Temp,np.ones(len(Temp)))
+            
+            
             if suboffres:
                 Temp = np.intersect1d(Temp,io.get_grTemp(TDparamoffres,KIDnum,Pread))
                 
@@ -392,6 +411,11 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                 except:
                     warnings.warn('Could not make Thermal Noise Level, {},KID{},-{} dBm,{}'.format(
                     Chipnum,KIDnum,Pread,spec))
+            if plttres:
+                tresline, = axs[0].plot(S21data[:,1]*1e3,
+                            S21data[:,2]/(np.pi*S21data[:,5])*1e6,color=clr,linestyle=':')
+                axs[0].legend((tresline,),('$\\tau_{res}$',))
+                
                     
         axs[0].set_yscale('log')
         for i in range(2):
@@ -486,7 +510,7 @@ def rejspec(Chipnum,KIDnum,sigma,Trange = (0,400),sepT = False, spec='SPR'):
             plt.ylim(0,100)
             plt.tight_layout()
             
-def Qif0(Chipnum,KIDnum,color='Pread',Tmax=.35,pltPread='all',
+def Qif0(Chipnum,KIDnum,color='Pread',Tmax=.5,pltPread='all',fracfreq=False,
         fig=None,ax12=None):
     dfld = io.get_datafld()
     if fig is None or ax12 is None:
@@ -516,14 +540,20 @@ def Qif0(Chipnum,KIDnum,color='Pread',Tmax=.35,pltPread='all',
             clr = cmap(norm(Pint[Preadar == Pread][0]))
         T = S21data[:,1]
         axs[0].plot(T[T<Tmax]*1e3,S21data[T<Tmax,4],color=clr)
-        axs[1].plot(T[T<Tmax]*1e3,(S21data[T<Tmax,5]-S21data[0,5])/S21data[0,5]*1e5,color=clr)
+        if fracfreq:
+            axs[1].plot(T[T<Tmax]*1e3,(S21data[T<Tmax,5]-S21data[0,5])/S21data[0,5]*1e5,color=clr)
+        else:
+            axs[1].plot(T[T<Tmax]*1e3,S21data[T<Tmax,5]*1e-9,color=clr)
         
     for ax in axs:
-        ax.set_xlabel('T (mK)')
+        ax.set_xlabel('Temperature (mK)')
         ax.get_yaxis().get_major_formatter().set_useOffset(False)
     axs[0].set_ylabel('$Q_i$')
     axs[0].ticklabel_format(axis='y',style='sci',scilimits=(0,0))
-    axs[1].set_ylabel('$10^5~\delta f_0/f_0$')
+    if fracfreq:
+        axs[1].set_ylabel('$10^5~\delta f_0/f_0$')
+    else:
+        axs[1].set_ylabel('f0 (GHz)')
     fig.tight_layout()
 
 def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',

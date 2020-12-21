@@ -41,8 +41,8 @@ def init_KID(Chipnum,KIDnum,Pread,Tbath,Teffmethod = 'GR',wvl = None,S21 = False
         tau1 = interpolate.splev(Tbath,tauspl)
         kbT = calc.kbTbeff(S21data,tau1,t0,kb,tpb,N0,kbTD,tesc1)
     elif Teffmethod == 'peak':
-        peakdata_ph,peakdata_amp = io.get_peakdata(Chipnum,KIDnum,Pread,Tbath,wvl)
-        tau1 = calc.tau_peak(peakdata_ph)
+        peakdata_ph,peakdata_amp = io.get_pulsedata(Chipnum,KIDnum,Pread,Tbath,wvl)
+        tau1 = calc.tau_pulse(peakdata_ph)
         kbT = calc.kbTbeff(S21data,tau1,t0,kb,tpb,N0,kbTD,tesc1)
     elif Teffmethod == 'Tbath':
         kbT = Tbath*1e-3*kb

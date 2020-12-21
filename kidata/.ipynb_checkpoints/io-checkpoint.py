@@ -96,8 +96,9 @@ def get_S21data(Chipnum, KIDnum, Pread=None):
     if Pread is None:
         Pread = Preadar[0]
     elif Pread not in Preadar:
-        warnings.warn('No S21data at this Pread. Closest value is selected')
-        Pread = Preadar[np.abs(Preadar - Pread).argmin()]
+        Pread_ = Preadar[np.abs(Preadar - Pread).argmin()]
+        warnings.warn(f'No S21data at this Pread. Closest value is selected: -{Pread_} dBm instead of - {Pread} dBm')
+        Pread = Pread_
     
     datafld = get_datafld()
     S21file = datafld + "\\".join(
@@ -142,7 +143,7 @@ def get_Preaddict(Chipnum):
         Preaddict[KIDnum] = get_grPread(TDparam,KIDnum)
     return Preaddict
 
-def get_peakdata(Chipnum,KIDnum, Pread, Tbath, wvlngth, points = 3000):
+def get_pulsedata(Chipnum,KIDnum, Pread, Tbath, wvlngth, points = 3000):
     datafld = get_datafld()
     peakfile = datafld + "\\".join(
         [

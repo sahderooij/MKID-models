@@ -123,7 +123,7 @@ def tau(freq, SPR, startf = None, stopf = None, plot=False,retfnl = False):
     else:
         return tau,tauerr
     
-def tau_peak(peakdata_ph,tfit=None,reterr=False,plot=False):
+def tau_pulse(peakdata_ph,tfit=None,reterr=False,plot=False):
     t = (np.arange(len(peakdata_ph)) - 500) 
     peak = peakdata_ph
     

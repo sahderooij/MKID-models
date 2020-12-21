@@ -300,24 +300,26 @@ class KID(object):
 
     def plot_S21resp(self, hwrad, tStop=None, tInc=None,
                      points=10):
+        plt.figure(figsize=(5,5))
         self.plot_freqsweep()
-        ts, S21, dAtheta = self.calc_respt(hwrad, tStop, tInc, points)
+        ts, S21, dAtheta = self.calc_respt(hwrad, tStop=tStop, tInc=tInc, points=points)
+        
         plt.plot(np.real(S21), np.imag(S21), '.b')
 
     def plot_dAthetaresp(self, hwrad, tStop=None, tInc=None,
                          points=50, plot='both'):
 
-        ts, S21, dAtheta = self.calc_respt(hwrad, tStop, tInc, points)
+        ts, S21, dAtheta = self.calc_respt(hwrad, tStop=tStop,tInc=tInc,points=points)
 
         plt.yscale('log')
         if plot == 'both':
-            plt.plot(ts, dAtheta[0, :])
+            plt.plot(ts, dAtheta[0,:])
             plt.figure()
-            plt.plot(ts, dAtheta[1, :])
+            plt.plot(ts, dAtheta[1,:])
         if plot == 'dA':
-            plt.plot(ts, dAtheta[0, :])
+            plt.plot(ts, dAtheta[0,:])
         if plot == 'theta':
-            plt.plot(ts, dAtheta[1, :])
+            plt.plot(ts, dAtheta[1,:])
 
     def plot_Nqpt(self, hwrad, tStop=None, tInc=None,
                   plot_phonon=False, fit_secondhalf=False,

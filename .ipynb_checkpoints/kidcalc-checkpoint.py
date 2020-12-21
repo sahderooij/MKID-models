@@ -45,15 +45,21 @@ def Vsc(kbTc,N0,kbTD):
                                  args=(D0,))[0]*N0)
 def load_Ddata(N0,kbTc,kbTD,kb=86.17):
     Ddataloc = 'C:/Users/stevendr/Google Drive/SRON/Projects/Coding/'
-    if (N0 == 1.72e4) & (kbTD == 37312.0):  # speed-up with interpolate
+    if (N0 == 1.72e4) & (kbTD == 37312.0):
         SC = 'Al'
+    elif (N0 == 4.08e4) & (kbTD == 86.17*246):
+        SC = 'Ta'
+    else:
+        SC = None
+    
+    if SC is not None:
         Tc = str(kbTc/kb).replace('.','_')
         try:
             Ddata = np.load(Ddataloc + 
                 f'Ddata_{SC}_{Tc}.npy')
         except FileNotFound:
             Ddata = None
-    else:
+    else: 
         Ddata = None
     return Ddata
 
@@ -86,7 +92,7 @@ def nqp(kbT, D, N0):
     else:
         def integrand(E, kbT, D, N0):
             return 4 * N0 * E / np.sqrt(E ** 2 - D ** 2) * f(E, kbT)
-        if kbT.size == 1 and D.size == 1:#make sure it can deal with kbT,D arrays
+        if type(kbT) is float or type(D) is float:#make sure it can deal with kbT,D arrays
             return integrate.quad(integrand, D, np.inf, args=(kbT, D, N0))[0]
         else:
             assert (kbT.size == D.size),'kbT and D arrays are not of the same size'
