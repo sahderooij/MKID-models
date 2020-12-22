@@ -92,7 +92,8 @@ def nqp(kbT, D, N0):
     else:
         def integrand(E, kbT, D, N0):
             return 4 * N0 * E / np.sqrt(E ** 2 - D ** 2) * f(E, kbT)
-        if type(kbT) is float or type(D) is float:#make sure it can deal with kbT,D arrays
+        if any([type(kbT) is float, type(D) is float,
+               type(kbT) is np.float64, type(D) is np.float(64)]):#make sure it can deal with kbT,D arrays
             return integrate.quad(integrand, D, np.inf, args=(kbT, D, N0))[0]
         else:
             assert (kbT.size == D.size),'kbT and D arrays are not of the same size'

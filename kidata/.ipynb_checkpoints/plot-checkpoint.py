@@ -272,6 +272,31 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                                                    (S21data[0,15]/1.6e-19*1e6)**2),s=0)
                 elif lvlcomp == 'Resp':            
                     sqrtlvlcompspl = Respspl
+                    
+                elif lvlcomp == 'RespPulse':
+                    pulsePreadar = io.get_pulsePread(Chipnum,KIDnum)
+                    pulsePreadselect = pulsePreadar[np.abs(pulsePreadar-Pread).argmin()]
+                    pulseTemp = io.get_pulseTemp(Chipnum,KIDnum,pulsePreadselect).min()
+                    pulsewvl = io.get_pulsewvl(Chipnum,KIDnum,pulsePreadselect,pulseTemp).min()
+                    phasepulse,amppulse = io.get_pulsedata(
+                        Chipnum,KIDnum,pulsePreadselect,pulseTemp,pulsewvl)
+                    
+                    phtau = calc.tau_pulse(phasepulse)
+                    amptau = calc.tau_pulse(amppulse)
+                    assert np.abs(1-phtau/amptau) < .1, 'Amp and Phase lifetimes differ by more than 10%' 
+                    dAdTheta = -1*(amppulse/phasepulse)[600:int(600+2*phtau)].mean()
+
+                    if spec == 'cross':
+                        Respspl = interpolate.splrep(
+                            S21data[:,1]*1e3,np.sqrt(S21data[:,10]**2*dAdTheta),s=0)
+                    elif spec == 'amp':
+                        Respspl = interpolate.splrep(
+                            S21data[:,1]*1e3,S21data[:,10]*dAdTheta,s=0)
+                    elif spec == 'phase':
+                        Respspl = interpolate.splrep(
+                            S21data[:,1]*1e3,S21data[:,10],s=0)
+                    sqrtlvlcompspl = Respspl
+                    
                 elif lvlcomp == 'RespPint':
                     Pint = 10**(-Pread/10)*S21data[:,2]**2/(S21data[:,3]*np.pi)
                     Pint /= Pint[0]
@@ -293,9 +318,6 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                         np.sqrt(V*(1+tesc_/.28e-3)*\
                                 (kbTc)**3/\
                                 (kidcalc.D(86.17*S21data[:,1],1.72e4,kbTc,37312.))**2),s=0)
-                elif lvlcomp == '':
-                    sqrtlvlcompspl = interpolate.splrep(
-                        S21data[:,1]*1e3,np.ones(len(S21data[:,1])))
                 elif lvlcomp == 'RespLowT':
                     sqrtlvlcompspl = interpolate.splrep(
                         S21data[:,1]*1e3,np.ones(len(S21data[:,1]))*\

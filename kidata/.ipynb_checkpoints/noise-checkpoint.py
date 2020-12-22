@@ -1,5 +1,3 @@
-from kidata import io,plot
-
 import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter,welch,csd
 from scipy.interpolate import splrep,splev
@@ -9,6 +7,8 @@ import numpy as np
 import glob
 from tqdm.notebook import tnrange
 import warnings
+
+from kidata import io,plot
 
 def to_ampphase(noisedata):
     Amp = np.sqrt(noisedata[:,0]**2+noisedata[:,1]**2)

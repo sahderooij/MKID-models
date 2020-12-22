@@ -9,6 +9,7 @@ from scipy.special import k0,i0
 
 from kidcalc import D, beta, cinduct, hwread, hwres, kbTeff, nqp
 from kidata import io,filters
+from kidata.plot import _selectPread
 
 def ak(S21data, lbd0=0.092, N0=1.72e4, kbTD=37312.0,plot=False,reterr=False,method='df'):
     # Extract relevant data
@@ -203,19 +204,7 @@ def tesc(Chipnum,KIDnum,Pread='max',
     defaulttesc=0):
     
     TDparam = io.get_grTDparam(Chipnum)
-    if Pread == 'max':
-        Pread = io.get_grPread(TDparam,KIDnum).min()
-    elif Pread == 'min':
-        Pread = io.get_grPread(TDparam,KIDnum).max()
-    elif Pread == 'med':
-        Preadarr = io.get_grPread(TDparam,KIDnum)
-        Pread = Preadarr[np.abs(Preadarr.mean()-Preadarr).argmin()]
-    elif type(Pread) is int:
-        np.sort(io.get_grPread(TDparam,KIDnum))[Pread]
-    elif type(Pread) is np.int32 or type(Pread) is np.uint8:
-        pass
-    else:
-        raise ValueError('{} not a valid Pread value'.format(Pread))
+    Pread = _selectPread(Pread,io.get_grPread(TDparam,KIDnum))[0]
 
     kbTc = io.get_S21data(Chipnum,KIDnum,
                        io.get_S21Pread(Chipnum,KIDnum)[0])[0,21]*kb

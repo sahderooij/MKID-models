@@ -10,20 +10,6 @@ def get_datafld():
     assert glob.glob(datafld), 'data folder not found'
     return datafld 
 
-def get_S21KIDs(Chipnum):
-    datafld = get_datafld()
-    S21fld = datafld + '\\'.join([Chipnum,'S21','2D'])
-    return np.unique([
-        int(i.split('\\')[-1].split('_')[0][3:]) 
-        for i in glob.glob(S21fld + '\\KID*_Tdep.csv')])
-
-def get_S21Pread(Chipnum,KIDnum):
-    datafld = get_datafld()
-    S21fld = datafld + '\\'.join([Chipnum,'S21','2D'])
-    return np.sort([
-        int(i.split('\\')[-1].split('_')[1][:-3]) 
-        for i in glob.glob(S21fld + '\\KID{}_*Tdep.csv'.format(KIDnum))])
-
 def read_dat(path):
     datdata = {}
     with open(path,'r') as file:
@@ -57,6 +43,21 @@ def read_dat(path):
                 datdata['Data'][Temp] = np.vstack((datdata['Data'][Temp],np.fromstring(line,sep='\t')))
         
     return datdata
+
+#S21
+def get_S21KIDs(Chipnum):
+    datafld = get_datafld()
+    S21fld = datafld + '\\'.join([Chipnum,'S21','2D'])
+    return np.unique([
+        int(i.split('\\')[-1].split('_')[0][3:]) 
+        for i in glob.glob(S21fld + '\\KID*_Tdep.csv')])
+
+def get_S21Pread(Chipnum,KIDnum):
+    datafld = get_datafld()
+    S21fld = datafld + '\\'.join([Chipnum,'S21','2D'])
+    return np.sort([
+        int(i.split('\\')[-1].split('_')[1][:-3]) 
+        for i in glob.glob(S21fld + '\\KID{}_*Tdep.csv'.format(KIDnum))])
     
 def get_S21dat(Chipnum,KIDnum,Pread=None):
     if Pread is None:
@@ -66,6 +67,65 @@ def get_S21dat(Chipnum,KIDnum,Pread=None):
                                 Chipnum,KIDnum,Pread)
     return read_dat(path)
 
+def get_S21data(Chipnum, KIDnum, Pread=None):
+    Preadar = get_S21Pread(Chipnum,KIDnum)
+    if Pread is None:
+        Pread = Preadar[0]
+    elif Pread not in Preadar:
+        Pread_ = Preadar[np.abs(Preadar - Pread).argmin()]
+        warnings.warn(f'No S21data at this Pread. Closest value is selected: -{Pread_} dBm instead of - {Pread} dBm')
+        Pread = Pread_
+    
+    datafld = get_datafld()
+    S21file = datafld + "\\".join(
+        [
+            Chipnum,
+            "S21",
+            "2D",
+            "_".join(["KID" + str(KIDnum), str(Pread) + "dBm", "Tdep.csv"]),
+        ]
+    )
+    S21data = np.genfromtxt(S21file, delimiter=",")[1:, :]
+    return S21data
+
+#Pulse
+def get_pulseKIDs(Chipnum):
+    return np.unique([int(i.split('\\')[-1].split('_')[0][3:]) 
+                     for i in glob.glob(get_datafld() + f'{Chipnum}\\*mK\\*.mat')])
+
+def get_pulsePread(Chipnum,KIDnum):
+    return np.unique([int(i.split('\\')[-1].split('_')[1][:-3])
+                      for i in glob.glob(
+                          get_datafld() + f'{Chipnum}\\*mK\\KID{KIDnum}*.mat')])
+
+def get_pulseTemp(Chipnum,KIDnum,Pread):
+    return np.unique([int(i.split('\\')[-2][:-2])
+                      for i in glob.glob(
+                          get_datafld() + f'{Chipnum}\\*mK\\KID{KIDnum}_{Pread}dBm*.mat')])
+
+def get_pulsewvl(Chipnum,KIDnum,Pread,Temp):
+    return np.unique([int(i.split('\\')[-1].split('_')[2])
+                      for i in glob.glob(
+                          get_datafld() + f'{Chipnum}\\{Temp}mK\\KID{KIDnum}_{Pread}dBm*.mat')])    
+    
+def get_pulsedata(Chipnum,KIDnum,Pread,Tbath,wvlngth,points = 3000):
+    datafld = get_datafld()
+    peakfile = datafld + "\\".join(
+        [
+            Chipnum,
+            str(Tbath) + "mK",
+            "_".join(
+                ["KID" + str(KIDnum), str(Pread) + "dBm",
+                 str(wvlngth), str(points) + "points"]
+            ),
+        ]
+    )
+    peakdata = scipy.io.loadmat(peakfile)
+    peakdata_ph = peakdata["pulsemodelfo"][0]
+    peakdata_amp = peakdata["pulsemodelfo_amp"][0]
+    return peakdata_ph, peakdata_amp
+
+#GR Noise data
 def get_noiseS21dat(Chipnum,KIDnum,Pread=None,dB=True):
     if Pread is None:
         Pread = get_grPread(get_grTDparam(Chipnum),KIDnum)[0]
@@ -90,75 +150,6 @@ def get_noisebin(Chipnum,KIDnum,Pread=None,T=None,freq='med'):
     datafld = get_datafld()
     path = datafld + f"{Chipnum}/Noise_vs_T/TD_2D/KID{KIDnum}_{Pread}dBm__TD{freq}_TmK{T}.bin"
     return np.fromfile(path,dtype='>f8').reshape(-1,2)
-
-def get_S21data(Chipnum, KIDnum, Pread=None):
-    Preadar = get_S21Pread(Chipnum,KIDnum)
-    if Pread is None:
-        Pread = Preadar[0]
-    elif Pread not in Preadar:
-        Pread_ = Preadar[np.abs(Preadar - Pread).argmin()]
-        warnings.warn(f'No S21data at this Pread. Closest value is selected: -{Pread_} dBm instead of - {Pread} dBm')
-        Pread = Pread_
-    
-    datafld = get_datafld()
-    S21file = datafld + "\\".join(
-        [
-            Chipnum,
-            "S21",
-            "2D",
-            "_".join(["KID" + str(KIDnum), str(Pread) + "dBm", "Tdep.csv"]),
-        ]
-    )
-    S21data = np.genfromtxt(S21file, delimiter=",")[1:, :]
-    return S21data
-
-def get_Vdict(Chipnum):
-    KIDlist = get_grKIDs(get_grTDparam(Chipnum))
-    Volumes = {}
-    for KIDnum in KIDlist:
-        S21data = get_S21data(Chipnum,KIDnum,
-                                       get_S21Pread(Chipnum,KIDnum)[0])
-        Volumes[KIDnum] = S21data[0,14]
-    return Volumes
-
-def get_Pintdict(Chipnum):
-    KIDlist = get_grKIDs(get_grTDparam(Chipnum))
-    Pintdict = {}
-    for KIDnum in KIDlist:
-        S21Pread = np.array(get_S21Pread(Chipnum,KIDnum))
-        Pintdict[KIDnum] = []
-        for Pread in S21Pread:
-            S21data =  get_S21data(Chipnum,KIDnum,Pread)
-            Q = S21data[0,2]
-            Qc = S21data[0,3]
-            Qi = S21data[0,4]
-            Pintdict[KIDnum].append(10*np.log10(10**(-1*Pread/10)*Q**2/Qc/np.pi))
-    return Pintdict
-
-def get_Preaddict(Chipnum):
-    TDparam = get_grTDparam(Chipnum)
-    KIDlist = get_grKIDs(TDparam)
-    Preaddict = {}
-    for KIDnum in KIDlist:
-        Preaddict[KIDnum] = get_grPread(TDparam,KIDnum)
-    return Preaddict
-
-def get_pulsedata(Chipnum,KIDnum, Pread, Tbath, wvlngth, points = 3000):
-    datafld = get_datafld()
-    peakfile = datafld + "\\".join(
-        [
-            Chipnum,
-            str(Tbath) + "mK",
-            "_".join(
-                ["KID" + str(KIDnum), str(Pread) + "dBm",
-                 str(wvlngth), str(points) + "points"]
-            ),
-        ]
-    )
-    peakdata = scipy.io.loadmat(peakfile)
-    peakdata_ph = peakdata["pulsemodelfo"][0]
-    peakdata_amp = peakdata["pulsemodelfo_amp"][0]
-    return peakdata_ph, peakdata_amp
 
 def get_grTDparam(Chipnum,offres=False):
     datafld = get_datafld() + '\\' + Chipnum + "\\NoiseTDanalyse\\"
@@ -204,3 +195,34 @@ def get_grdata(TDparam,KIDnum,Pread,Temp,spec='cross'):
     else:
         raise ValueError('spec must be \'cross\', \'phase\' or \'amp\'.')
     return freq,SPR
+
+def get_Vdict(Chipnum):
+    KIDlist = get_grKIDs(get_grTDparam(Chipnum))
+    Volumes = {}
+    for KIDnum in KIDlist:
+        S21data = get_S21data(Chipnum,KIDnum,
+                                       get_S21Pread(Chipnum,KIDnum)[0])
+        Volumes[KIDnum] = S21data[0,14]
+    return Volumes
+
+def get_Pintdict(Chipnum):
+    KIDlist = get_grKIDs(get_grTDparam(Chipnum))
+    Pintdict = {}
+    for KIDnum in KIDlist:
+        S21Pread = np.array(get_S21Pread(Chipnum,KIDnum))
+        Pintdict[KIDnum] = []
+        for Pread in S21Pread:
+            S21data =  get_S21data(Chipnum,KIDnum,Pread)
+            Q = S21data[0,2]
+            Qc = S21data[0,3]
+            Qi = S21data[0,4]
+            Pintdict[KIDnum].append(10*np.log10(10**(-1*Pread/10)*Q**2/Qc/np.pi))
+    return Pintdict
+
+def get_Preaddict(Chipnum):
+    TDparam = get_grTDparam(Chipnum)
+    KIDlist = get_grKIDs(TDparam)
+    Preaddict = {}
+    for KIDnum in KIDlist:
+        Preaddict[KIDnum] = get_grPread(TDparam,KIDnum)
+    return Preaddict
