@@ -10,12 +10,14 @@ import matplotlib.pyplot as plt
 import matplotlib
 import warnings
 
-def get_KIDparam(Chipnum,KIDnum,Pread,plottesc=False,tescPread='max'):
+def get_KIDparam(Chipnum,KIDnum,Pread,plottesc=False,
+                 tescPread='max',tescrelerrthrs=.2):
     S21data = io.get_S21data(Chipnum,KIDnum,Pread)
     V = S21data[0,14]
     kbTc = S21data[0,21]*86.17
 
-    tesc = calc.tesc(Chipnum,KIDnum,pltkaplan=plottesc,Pread=tescPread)
+    tesc = calc.tesc(Chipnum,KIDnum,pltkaplan=plottesc,
+                     Pread=tescPread,relerrthrs=tescrelerrthrs)
     return V,kbTc,tesc
 
 #####################################################################################
@@ -99,7 +101,7 @@ class Model:
             else:
                 freq,swdB = self.calc_spec(*args,Temp[i]*self.kb,lvlcal=lvlcal,PSDs=PSDs)
 
-            tau[i],tauerr[i],lvl[i],lvlerr[i] = calc.tau(freq,swdB,
+            tau[i],tauerr[i],lvl[i],lvlerr[i] = calc.tau(freq,swdB,startf=1e0,stopf=1e5,
                                                              plot=False,retfnl=True)
             if plotspec:
                 plt.figure('Spectra')

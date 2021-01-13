@@ -57,7 +57,7 @@ def load_Ddata(N0,kbTc,kbTD,kb=86.17):
         try:
             Ddata = np.load(Ddataloc + 
                 f'Ddata_{SC}_{Tc}.npy')
-        except FileNotFound:
+        except FileNotFoundError:
             Ddata = None
     else: 
         Ddata = None

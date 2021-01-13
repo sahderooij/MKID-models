@@ -29,6 +29,8 @@ def _selectPread(pltPread,Preadar):
                                 Preadar.min()])
         elif pltPread == 'all':
             Pread = Preadar[::-1]
+        else:
+            raise ValueError('{} is not a valid Pread selection'.format(pltPread))
     elif type(pltPread) == list:
         Pread = np.array(pltPread)
     elif type(pltPread) == int:
@@ -51,6 +53,8 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',comptres=
 
     if KIDlist is None:
         KIDlist = io.get_grKIDs(TDparam)
+    elif type(KIDlist) is int:
+        KIDlist = [KIDlist]
     
     if spec == 'all':
         specs = ['cross','amp','phase']
@@ -101,6 +105,7 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',comptres=
                         freq,SPR = filters.del_1fnNoise(freq,SPR)
                         
                     SPR[SPR==-140] = np.nan
+                    SPR[SPR==-np.inf] = np.nan
 
                         
                     if lvlcomp == 'Resp':
@@ -113,6 +118,7 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',comptres=
                         elif spec == 'phase':
                             Respspl = interpolate.splrep(
                                 S21data[:,1]*1e3,S21data[:,10],s=0)
+                        
                         SPR = 10*np.log10(10**(SPR/10)/interpolate.splev(Temp[i],Respspl)**2)
                         
                     if comptres:
@@ -147,7 +153,7 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                 delampNoise=False,del1fNoise=False,del1fnNoise=False,suboffres=False,relerrthrs=.2,
                 pltKIDsep=True,pltthlvl=False,pltkaplan=False,pltthmfnl=False,plttres=False,
                 fig=None,ax12=None,color='Pread',pltclrbar=True,fmt='-o',label=None,
-                defaulttesc=0,tescPread='max',tescpltkaplan=False,
+                defaulttesc=0,tescPread='max',tescpltkaplan=False,tescTminmax=(300,400),
                 showfit=False,savefig=False):
 
     def _make_fig():
@@ -229,7 +235,7 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
             
         if pltthlvl or 'tesc' in lvlcomp or pltkaplan:
             tesc_ = calc.tesc(Chipnum,KIDnum,
-                         defaulttesc=defaulttesc,
+                         defaulttesc=defaulttesc,minTemp=tescTminmax[0],maxTemp=tescTminmax[1],
                          relerrthrs=relerrthrs,Pread=tescPread,pltkaplan=tescpltkaplan)
     
         for Pread in Preadar:
@@ -355,18 +361,16 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                     freq,SPR = filters.del_1fNoise(freq,SPR)
                 if del1fnNoise:
                     freq,SPR = filters.del_1fnNoise(freq,SPR)
-
                     
+                if showfit:
+                    print('{}, KID{}, -{} dBm, T={}, {}'.format(
+                        Chipnum,KIDnum,Pread,Temp[i],spec))
                 taut[i],tauterr[i],lvl[i],lvlerr[i] = \
                     calc.tau(freq,SPR,plot=showfit,retfnl=True,
                              startf=startstopf[0],stopf=startstopf[1])
                 if showfit:
-                    plt.title('{}, KID{}, -{} dBm, T={}, {},\n relerr={}'.format(
-                        Chipnum,KIDnum,Pread,Temp[i],spec,tauterr[i]/taut[i]))
-                    plt.xlim(1e-1,1e5)
-                    plt.ylim(-120,-50)
-                    plt.show()
-                    plt.close()
+                    print(tauterr[i]/taut[i])
+
                                 
                 lvl[i] = lvl[i]/interpolate.splev(Temp[i],sqrtlvlcompspl)**2
                 lvlerr[i] = lvlerr[i]/interpolate.splev(Temp[i],sqrtlvlcompspl)**2
@@ -400,7 +404,7 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                     Tstartstop = (Temp[mask].min(),Temp[mask].max())
                 Ttemp = np.linspace(*Tstartstop,100)
                 explvl = interpolate.splev(Ttemp,Respspl)**2
-                explvl *= 4*1e-6*.44*S21data[0,14]*1.72e4*(86.17*S21data[0,21])**3/\
+                explvl *= 4*.44e-6*S21data[0,14]*1.72e4*(86.17*S21data[0,21])**3/\
                 (2*(S21data[0,15]/1.602e-19*1e6)**2)*(1+tesc_/.28e-3)/2
                 explvl /= interpolate.splev(Ttemp,sqrtlvlcompspl)**2
                 thlvlplot, = axs[1].plot(Ttemp,10*np.log10(explvl),

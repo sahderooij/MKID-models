@@ -11,8 +11,8 @@ def del_ampNoise(freq,SPR,plot=False):
     #Make it non-dB
     SPRn = 10**(SPR/10)
     #Substract amplifier noise
-    startr1 = 3e4
-    stopr1 = 2e5
+    startr1 = 7e3
+    stopr1 = 1e4
     startr2 = 3e2
     stopr2 = 1e4
     if SPRn[np.logical_and(freq>startr1,freq<stopr1)].size > 0 and \

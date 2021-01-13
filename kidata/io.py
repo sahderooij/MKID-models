@@ -73,7 +73,8 @@ def get_S21data(Chipnum, KIDnum, Pread=None):
         Pread = Preadar[0]
     elif Pread not in Preadar:
         Pread_ = Preadar[np.abs(Preadar - Pread).argmin()]
-        warnings.warn(f'No S21data at this Pread. Closest value is selected: -{Pread_} dBm instead of - {Pread} dBm')
+        warnings.warn(f'No S21data at this Pread. '+ 
+                      f'Closest value is selected: -{Pread_} dBm instead of -{Pread} dBm')
         Pread = Pread_
     
     datafld = get_datafld()
@@ -82,7 +83,7 @@ def get_S21data(Chipnum, KIDnum, Pread=None):
             Chipnum,
             "S21",
             "2D",
-            "_".join(["KID" + str(KIDnum), str(Pread) + "dBm", "Tdep.csv"]),
+            "_".join(["KID" + str(KIDnum), str(int(Pread)) + "dBm", "Tdep.csv"]),
         ]
     )
     S21data = np.genfromtxt(S21file, delimiter=",")[1:, :]

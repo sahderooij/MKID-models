@@ -75,12 +75,14 @@ def tau(freq, SPR, startf = None, stopf = None, plot=False,retfnl = False):
     SPR = SPR[SPR!=-140]
     freq = freq[~np.isnan(SPR)]
     SPR = SPR[~np.isnan(SPR)]
+    freq = freq[SPR!=-np.inf]
+    SPR = SPR[SPR!=-np.inf]
     if stopf is None:
-        bdwth = np.logical_and(freq>3e2,freq<5e4)
+        bdwth = np.logical_and(freq>3e2,freq<3e4)
         try:
             stopf = freq[bdwth][np.real(SPR[bdwth]).argmin()]
         except ValueError:
-            stopf = 3e4
+            stopf = 25e4
     if startf is None:
         startf = max(10**(np.log10(stopf)-3),1e2)
     
@@ -118,6 +120,7 @@ def tau(freq, SPR, startf = None, stopf = None, plot=False,retfnl = False):
         if ~np.isnan(tau):
             plt.plot(fitfreq, 10*np.log10(Lorspec(fitfreq,tau*1e-6,N)))
         plt.xscale("log")
+        plt.show(); plt.close()
         
     if retfnl:
         return tau,tauerr,4*N*tau*1e-6,np.sqrt((4e-6*N*tauerr)**2 + (4e-6*Nerr*tau)**2)
@@ -215,13 +218,12 @@ def tesc(Chipnum,KIDnum,Pread='max',
     tqpstar = np.zeros(len(Temp))
     tqpstarerr = np.zeros(len(Temp))
     for i in range(len(Temp)):
+        if pltfit:
+            print('{} KID{} -{} dBm T={} mK'.format(
+                Chipnum,KIDnum,Pread,Temp[i]))
         freq,SPR = io.get_grdata(TDparam,KIDnum,Pread,Temp[i])
         tqpstar[i],tqpstarerr[i] = tau(freq,SPR,plot=pltfit)
-        if pltfit:
-            plt.title('{} KID{} -{} dBm T={} mK'.format(
-                Chipnum,KIDnum,Pread,Temp[i]))
-            plt.show()
-            plt.close()
+
         
         
         if tqpstarerr[i]/tqpstar[i] > relerrthrs or \
