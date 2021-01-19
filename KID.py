@@ -1,4 +1,6 @@
 import kidcalc
+from kidata import calc,io
+
 import numpy as np
 import scipy.integrate as integrate
 from scipy import interpolate
@@ -6,9 +8,16 @@ from scipy.integrate import odeint
 from scipy.optimize import minimize_scalar as minisc
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
+import warnings
 
 class KID(object):
-    """A class to make KID objects"""
+    '''This class makes an KID-object, which is intended to predict the 
+    response of an MKID to an incoming photon. Attributes of this object
+    include parameters like the Quality factors. Deduced parameters (
+    like the number of quasiparticles) are defined with the property 
+    decorator, such that they change when a attribute is changed.
+    If an eq. or chapter is mentioned without reference, the
+    PhD thesis of Pieter de Visser is implied.'''
     def __init__(self, 
                  Qc=2e4, 
                  hw0=5*.6582*2*np.pi,
@@ -19,6 +28,9 @@ class KID(object):
                  d=.05, 
                  tesc = .14e-3,
                  kbTc = 1.2*86.17):
+        '''Attributes are defined here. hw0 and kbT0 give the resonance frequency
+        at temperature T0, both in µeV, from which we linearize to calculate the 
+        new resonance frequencies.'''
         self.Qc = Qc  # -
         self.hw0 = hw0  # µeV
         self.kbT0 = kbT0  # µeV
@@ -26,29 +38,33 @@ class KID(object):
         self.V = V  # µm^3
         self.ak = ak  # -
         self.d = d  # µm
-        self.tesc = tesc  # µs - interpolate for 50 nm from table 8.1 deVisser2014
+        self.tesc = tesc  # µs 
 
-        # All for Al:
-        self.kbTc = kbTc
+        # All for Al: (FUTURE: replace by SC-object)
+        self.kbTc = kbTc  # µeV
         self.kbTD = 37312.  # µeV
         self.t0 = 440e-3  # µs
         self.tpb = .28e-3  # µs
         self.lbd0 = .092  # µm
         self.N0 = 1.72e4  # µeV^-1 µm^-3
-        # arb. see Guruswamy2014
-        self.epb = .6 - .4*np.exp(-self.tesc/self.tpb)
+        self.epb = .6 - .4*np.exp(-self.tesc/self.tpb) # arbitary,
+        # see Guruswamy2014 for more details on pair-breaking efficiency
 
 # Calculated attributes
     @property
     def D0(self):
+        '''Returns the energy gap at T=0, according to BSC'''
         return 1.76*self.kbTc
 
     @property
     def D_0(self):
+        '''Energy gap at T'''
         return kidcalc.D(self.kbT, self.N0, self.kbTc, self.kbTD)
 
     @property  # takes 1.2s to calculate
     def hwread(self):
+        '''Gives the read frequency such that it is equal to the resonance
+        frequency.'''
         return kidcalc.hwread(self.hw0, self.kbT0, self.ak,
                               self.lbd0, self.d, self.D_0,
                               self.D0, self.kbT, self.N0,
@@ -70,10 +86,9 @@ class KID(object):
     def Qi_0(self):
         hwread = self.hwread
         s_0 = kidcalc.cinduct(hwread, self.D_0, self.kbT)
-        Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak,
+        return kidcalc.Qi(s_0[0], s_0[1], self.ak,
                           self.lbd0, self.d, self.D_0, self.D0,
                           self.kbT)
-        return Qi_0
     @property
     def Q_0(self):
         return self.Qc*self.Qi_0/(self.Qc+self.Qi_0)
@@ -92,6 +107,8 @@ class KID(object):
         return kidcalc.cinduct(self.hw0, D_0, self.kbT0)[1]
     
     def fit_epb(self,peakdata,wvl,*args,var='phase'):
+        '''Sets the pair-breaking efficiency to match the maximum of 
+        the predicted pulse the highest point of peakdata.'''
         peakheight = peakdata.max()
         hwrad = 6.528e-4*2*np.pi*3e8/(wvl*1e-3)
         tres = self.tres
@@ -108,12 +125,16 @@ class KID(object):
         self.epb = res.x
     
     def set_Teff(self,eta,P):
+        '''Calculates the effective temperature, based on a quasiparticle
+        generation term eta*P/D. '''
         R,V,G_B,G_es,N_w0 = self.calc_params()
         Nqp0 = np.sqrt(V*((1+G_B/G_es)*eta*P/self.D_0+2*G_B*N_w0)/R)
         self.kbT = kidcalc.kbTeff(Nqp0,self.N0, V, self.kbTc, self.kbTD)
 
 # Calculation functions
     def rateeq(self,N,t,params):
+        '''Rate equations (or Rothwarf-Taylor equations) that 
+        govern the quasiparticle dynamics.'''
         N_qp, N_w = N
         R, V, G_B, G_es, N_w0 = params
         derivs = [-R*N_qp**2/V + 2*G_B*N_w,
@@ -233,7 +254,7 @@ class KID(object):
                 self.calc_resp(Nqpts[i], hwread, s20, D_0)
         return ts, S21, dAtheta
     
-    ##Noise calculation functions
+# Noise calculation functions
     def calc_respsv(self,plot=False):
         hwread = self.hwread
         s20 = self.s20
@@ -387,7 +408,7 @@ class KID(object):
             plt.yscale('log')
     
     def print_params(self):
-        #Print Latex table for all the parameters
+        '''This prints a Latex table with all parameters.'''
         units = ['','\micro\electronvolt','\micro\electronvolt','\micro\electronvolt',
                  '\cubic\micro\meter','','\\nano\meter','\\nano\second',
                  '\micro\electronvolt','\milli\electronvolt','\\nano\second',
@@ -408,6 +429,8 @@ class KID(object):
 
 ########################################################################
 class S21KID(KID):
+    '''Same class as KID, but with the Qi-factor from the measured 
+    S21-curves, instead of Mattis-Bardeen theory.'''
     def __init__(self,
                  S21data,
                  Qc=2e4, 
@@ -450,3 +473,50 @@ class S21KID(KID):
                          np.imag(S21)**2)/(1-xc)
         theta = np.arctan2(np.imag(S21), (xc-np.real(S21)))
         return S21, dA, theta
+    
+################################################################################
+def init_KID(Chipnum,KIDnum,Pread,Tbath,Teffmethod = 'GR',wvl = None,S21 = False,
+                t0=.44,
+                kb=86.17,
+                tpb=.28e-3,
+                N0=1.72e4,
+                kbTD=37312.0,
+                lbd0=.092):
+    '''This returns an KID object, with the parameters initialized by 
+    measurements on a physical KID. The effective temperature is set with an 
+    lifetime measurement, either from GR noise (GR) or pulse (pulse)'''
+    TDparam = io.get_grTDparam(Chipnum)
+    S21data = io.get_S21data(Chipnum,KIDnum,Pread)
+    Qc = S21data[0, 3]
+    hw0 = S21data[0, 5]*2*np.pi*6.582e-4*1e-6
+    kbT0 = kb * S21data[0, 1]
+    V = S21data[0, 14]
+    d = S21data[0, 25]
+    kbTc = S21data[0,21] * kb
+    ak1 = calc.ak(S21data,lbd0,N0,kbTD)[0]
+    
+    tesc1 = calc.tesc(Chipnum,KIDnum,t0=t0,kb=kb,tpb=tpb,N0=N0,kbTD=kbTD)
+    
+    if Teffmethod == 'GR':
+        Temp = io.get_grTemp(TDparam,KIDnum,Pread)
+        taut = np.zeros(len(Temp))
+        for i in range(len(Temp)):
+            freq,SPR = io.get_grdata(TDparam,KIDnum,Pread,Temp[i])
+            taut[i] = calc.tau(freq,SPR)[0]
+        tauspl = interpolate.splrep(Temp[~np.isnan(taut)],taut[~np.isnan(taut)])
+        tau1 = interpolate.splev(Tbath,tauspl)
+        kbT = kidcalc.kbTbeff(tau1,V=V,kbTc=kbTc,t0,kb,tpb,N0,kbTD,tesc1)
+    elif Teffmethod == 'pulse':
+        peakdata_ph,peakdata_amp = io.get_pulsedata(Chipnum,KIDnum,Pread,Tbath,wvl)
+        tau1 = calc.tau_pulse(peakdata_ph)
+        kbT = kidcalc.kbTbeff(tau1,V=V,kbTc=kbTc,t0,kb,tpb,N0,kbTD,tesc1)
+    elif Teffmethod == 'Tbath':
+        kbT = Tbath*1e-3*kb
+    
+    if S21:
+        return KID.S21KID(S21data,
+            Qc=Qc,hw0=hw0,kbT0=kbT0,kbT=kbT,V=V,
+                          ak=ak1,d=d,kbTc=kbTc,tesc=tesc1)
+    else:
+        return KID.KID(
+            Qc=Qc, hw0=hw0, kbT0=kbT0, kbT=kbT, V=V, ak=ak1, d=d, kbTc = kbTc,tesc = tesc1)

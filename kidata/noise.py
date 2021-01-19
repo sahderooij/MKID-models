@@ -11,6 +11,12 @@ import warnings
 from kidata import io,plot,calc
 
 def to_ampphase(noisedata):
+    '''Converts the I and Q variables from the raw .dat file to (normalized) amplitude and phase.
+    Takes: 
+    data from io.get_noisebin
+    
+    Returns:
+    Amplitude, Phase: numpy arrays'''
     Amp = np.sqrt(noisedata[:,0]**2+noisedata[:,1]**2)
     Amp /= Amp.mean()
     Phase = (np.pi - \
@@ -19,6 +25,8 @@ def to_ampphase(noisedata):
     return Amp,Phase
 
 def subtr_offset(data,plot=False):
+    '''Subtracts a quadratic offset from a time stream (data) to compensate temperature drifts.
+    Optionally plots the quadratic fit.'''
     t = np.arange(len(data))
     p = np.polyfit(t[::int(len(data)/1e3)],
                    data[::int(len(data)/1e3)],2) #speed-up the fit by selecting points
@@ -26,11 +34,15 @@ def subtr_offset(data,plot=False):
         plt.figure()
         plt.plot(t,data)
         plt.plot(t,np.polyval(p,t))
-        plt.show()
-        plt.close()
+        plt.show();plt.close()
     return data - np.polyval(p,t)
 
 def smooth(data,tau,sfreq):
+    '''Smooths a time stream with half of the lifetime (tau) via a moving average.
+    Takes:
+    data -- time stream data
+    tau -- lifetime of pulses
+    sfreq -- sample frequency of the data.'''
     wnd = int(tau/2*sfreq)
     if wnd % 2 != 1:
         wnd += 1
@@ -38,16 +50,27 @@ def smooth(data,tau,sfreq):
 
 def rej_pulses(data,nrsgm=6,nrseg=32,sfreq=50e3,
                smoothdata=False,plot=False):
+    '''Pulse rejection algorithm. It devides the time stream into segments and rejects segments based on a threshold. Based on PdV's pulse rejection algorithm.
+    
+    Arguments:
+    data -- the time stream to be analyzed
+    nrsgm -- number of times the minimal standard deviation to use as threshold (default 6)
+    nrseg -- number of segments to divide the time stream in (default 32)
+    sfreq -- sample frequency (default 50 kHz), only needed when plot or smoothdata.
+    smoothdata -- boolean to determine to smooth the timestream first. If True, the lifetime is estimated on a Lorenzian fit on the non-rejected full time stream and given to the smooth function. if the fit fails, the lifetime is set to 1 µs. 
+    plot -- boolean to plot time stream with rejection indication.
+    
+    Returns:
+    The splitted input data and a list of booleans which segments are rejected.'''
+    
     if smoothdata:
-        #estimate lifetime via initial PSD:
+        #estimate lifetime via initial PSD and Lorentzian fit.
         freq,PSD = welch(data,sfreq,'hamming',nperseg=.5*sfreq)
-        tau,tauerr = calc.tau(freq,10*np.log10(PSD),plot=True)
-        print(tauerr/tau)
+        tau,tauerr = calc.tau(freq,10*np.log10(PSD))
         if tauerr/tau >= .1:
             tau = 1
             warnings.warn('Could not estimate lifetime from PSD, 1 µs is used')
         tau*=1e-6 #convert to seconds
-        
         smdata = smooth(data,tau,sfreq)
     else:
         smdata = data
@@ -70,27 +93,42 @@ def rej_pulses(data,nrsgm=6,nrseg=32,sfreq=50e3,
                 'r')
         ax.legend()
         ax.set_xlabel('Time (s)')
-        plt.show()
-        plt.close()
+        plt.show();plt.close()
         
     return np.array(np.array_split(data,nrseg)),reject
 
 def calc_avgPSD(dataarr,reject,dataarr1=None,reject1=None,sfreq=50e3):
-    if dataarr1 is None and reject1 is None:
+    '''Calculates the average cross PSD of dataarr and dataarr1, 
+    from the segments of which both reject and reject1 are False.
+    Takes:
+    dataarr -- numpy array of segments in first axis and time in the second.
+    reject -- boolean list of the same length as the first axis of dataarr.
+    dataarr1 -- see dataarr
+    reject1 -- see reject
+    sfreq -- sample frequency
+    
+    Returns:
+    frequency -- nan if all parts are rejected
+    average PSD -- nan if all parts are rejected.'''
+    if dataarr1 is None or reject1 is None:
         dataarr1 = dataarr
         reject1 = reject
     rejects = np.logical_or(reject,reject1)
     if rejects.sum() != rejects.size:
+        # csd is used, which uses Welch's method. 
+        # However, we choose nfft and nperseg as the full length, 
+        # so we're only calculating the periodogram with a Hamming window.
         f,psds = csd(dataarr[~rejects],dataarr1[~rejects],
                      window='hamming',nperseg=len(dataarr[0]),
                      nfft=len(dataarr[0]),
                      fs=sfreq,axis=1,scaling='density')
         return f,psds.mean(0)
     else:
-        warnings.warn('All parts are rejected')
+        warnings.warn('All parts are rejected, returning nans')
         return np.full([2,1],np.nan)
 
 def logsmooth(freq,psd,ppd):
+    '''Down-samples a spectrum to a certain points per decade (ppd).'''
     if ~np.isnan(freq).all() and ~np.isnan(psd).all():
         logfmax = np.ceil(np.log10(freq.max()))
         logfmin = np.floor(np.log10(freq[freq.argmin()+1]))
@@ -98,7 +136,7 @@ def logsmooth(freq,psd,ppd):
         freqdiv = np.logspace(logfmin,logfmax,int(ppd*(logfmax-logfmin))+1)
         opsd = np.empty(len(freqdiv)-1,dtype='c16')
         of = np.empty(len(freqdiv)-1)
-        with warnings.catch_warnings():
+        with warnings.catch_warnings():  # To suppress warnings about sections being empty
             warnings.simplefilter('ignore',RuntimeWarning)
             for i in range(len(freqdiv)-1):
                 fmask = np.logical_and(freq>freqdiv[i],freq<freqdiv[i+1])
@@ -115,16 +153,33 @@ def do_TDanalysis(Chipnum,
         nrseg = 32,
         nrsgm = 6,
         sfreq=50e3):
+    '''Main function of this module that executes the noise post-processing.
+    It writes the number of rejected segments and output PSDs in the same format as 
+    the algorithm by PdV (.mat-file).
+    Takes:
+    Chipnum -- Chip number to preform the analysis on
+    resultpath -- output where the resulting .mat-file is written. Default is NoiseTDanalyse folder.
+    matname -- name of the output .mat-file. Default is TDresults.
+    ppd -- points per decade to downsample the PSDs (default 30).
+    nrseg -- number of segments for the pulse rejection.
+    nrsgm -- number of standard deviations to reject a segment in pulse rejection (default 6).
+    sfreq -- sample frequency of the data (default 50 kHz, to be removed).
+    
+    Returns:
+    Nothing, but writes the .mat-file in the resultpath under matname.'''
     
     if resultpath is None:
         resultpath = io.get_datafld()+f'{Chipnum}/NoiseTDanalyse/'
-        
+    
+    #find all KIDs, Read powers and Temperatures
     KIDPrT = np.array([[int(i.split('\\')[-1].split('_')[0][3:]),
                         int(i.split('\\')[-1].split('_')[1][:-3]),
                         int(i.split('\\')[-1].split('_')[4][3:-4])] 
               for i in glob.iglob(io.get_datafld() + \
                                   f'{Chipnum}/Noise_vs_T/TD_2D/*TDmed*.bin')])
     KIDs = np.unique(KIDPrT[:,0])
+    
+    #initialize:
     TDparam = np.empty((1,len(KIDs)),
                        dtype=[
                            ('kidnr','O'),('Pread','O'),

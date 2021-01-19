@@ -13,6 +13,7 @@ from kidata import filters
 import kidcalc
 
 def _selectPread(pltPread,Preadar):
+    '''Function that returns a Pread array, depending on the input pltPread.'''
     if type(pltPread) is str:
         if pltPread == 'min':
             Pread = np.array([Preadar.max()])
@@ -47,6 +48,11 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',comptres=
               plttres=False,
               Tminmax=(0,500),ax12=None,
              xlim=(None,None),ylim=(None,None)):
+    '''Plots PSDs of multiple KIDs, read powers and temperatures (indicated by color). Every KID has a new figure, which is returned if only one KID is plotted.
+    lvlcomp specifies how the noise levels should be compensated (will be a different function in the future). 
+    Use Resp to divide by responsivity and obtain quasiparticle fluctuations.
+    comptres compensates for the factor (1+(omega*taures)^2), to get the quasiparticle fluctuations.
+    plttres will plot arrow at the frequencies corresponding to the resonator ring time.'''
     TDparam = io.get_grTDparam(Chipnum)
     if suboffres:
         TDparamoffres = io.get_grTDparam(Chipnum,offres=True)
@@ -107,7 +113,6 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',comptres=
                     SPR[SPR==-140] = np.nan
                     SPR[SPR==-np.inf] = np.nan
 
-                        
                     if lvlcomp == 'Resp':
                         if spec == 'cross':
                             Respspl = interpolate.splrep(
@@ -155,6 +160,23 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                 fig=None,ax12=None,color='Pread',pltclrbar=True,fmt='-o',label=None,
                 defaulttesc=0,tescPread='max',tescpltkaplan=False,tescTminmax=(300,400),
                 showfit=False,savefig=False):
+    '''Plots the results from a Lorentzian fit to the PSDs of multiple KIDs, read powers and temperatures. 
+    Two axes: 0: lifetimes 1: noise levels, both with temperature on the x-axis. The color can be specified and
+    is Pread by default. 
+    Options:
+    startstopf -- defines the fitting window
+    lvlcomp -- defines how the levels are compensated. Use Resp for responsivity compensation.
+        (will be moved in the future)
+    del{}Noise -- filter spectrum before fitting.
+    relerrthrs -- only plot fits with a relative error threshold in lifetime less than this.
+    pltKIDsep -- if True, different KIDs get a new figure.
+    pltthlvl -- expected noise level is plotted as dashed line
+    pltkaplan -- a kaplan fit (tesc as parameter) is plotted in the lifetime axis.
+    pltthmfnl -- a noise level from the fitted lifetime and theoretical Nqp is plotted as well
+    plttres -- the resonator ring time is plotted in the lifetime axis.
+    ... multiple figure handling options ...
+    ... options for the tesc deteremination ...
+    showfit -- the fits are displayed in numerous new figures, for manual checking.'''
 
     def _make_fig():
         fig, axs = plt.subplots(1,2,figsize=(8,3))
@@ -417,7 +439,7 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                 else:
                     Tstartstop = (Temp[mask].min(),Temp[mask].max())
                 T = np.linspace(*Tstartstop,100)*1e-3
-                taukaplan = calc.tau_kaplan(T,tesc=tesc_,kbTc=86.17*S21data[0,21])
+                taukaplan = kidcalc.tau_kaplan(T,tesc=tesc_,kbTc=86.17*S21data[0,21])
                 kaplanfit, = axs[0].plot(T*1e3,taukaplan,color=clr,linestyle='--',linewidth=2.)
                 axs[0].legend((kaplanfit,),('Kaplan',))
                 
@@ -467,77 +489,12 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
     if ax12 is None:
         return fig,axs
             
-def rejspec(Chipnum,KIDnum,sigma,Trange = (0,400),sepT = False, spec='SPR'):
-    dfld = io.get_datafld()
-    for j in range(len(sigma)):
-        #Load matfile and extract Pread en temperature
-        matfl = scipy.io.loadmat(
-            dfld + '\\'+ Chipnum + '\\Noise_vs_T' + '\\TDresults_{}'.format(sigma[j])
-        )['TDparam']
-        if Chipnum == 'LT139':
-            if KIDnum == 1:
-                ind = 0
-            elif KIDnum == 6:
-                ind = 2
-            elif KIDnum == 7:
-                ind = 3
-            else:
-                raise ValueError('KID{} is not in LT139'.format(KIDnum))
-        else:
-            ind = KIDnum - 1 
-        Preadar = matfl['Pread'][0,ind][:,1]
-        Pread = Preadar[-1]
-        Pind = np.where(Preadar == Pread)
-        Tar = matfl['Temp'][0,ind][Pind,:][0,0]
-        Tmin,Tmax = Trange
-        Tar=Tar[np.logical_and(Tar>Tmin,Tar<Tmax)]
-        Tar=np.flip(Tar) #To plot the lowest temperatures last        
-
-        #Plot spectrum from each temperature
-        if not sepT:
-            plt.figure(figsize=(10,4))
-            plt.subplot(1,2,1)
-            cmap = matplotlib.cm.get_cmap('viridis')
-            norm = matplotlib.colors.Normalize(Tar.min(),Tar.max())
-            percrej = np.zeros(len(Tar))
-        for i in range(len(Tar)):
-            Tind = np.where(np.flip(Tar) == Tar[i])
-            freq = matfl['fmtotal'][0,ind][Pind,Tind][0,0][0]
-            if spec == 'SPR':
-                SPR = matfl['SPRrealneg'][0,ind][Pind,Tind][0,0][0]
-            elif spec == 'SPP':
-                SPR = matfl['SPPtotal'][0,ind][Pind,Tind][0,0][0]
-            elif spec == 'SRR':
-                SPR = matfl['SRRtotal'][0,ind][Pind,Tind][0,0][0]
-            else:
-                raise ValueError('Choose SPR, SPP or SRR as spec')
-            SPR[SPR==-140] = np.nan #delete -104 dBm, because that is minimum.
-            if sepT:
-                plt.figure(np.floor(i/2),figsize=(10,4))
-                plt.subplot(1,2,i%2+1)
-                plt.title('KID{}, -{} dBm, {} mK'.format(KIDnum,Pread,Tar[i]))
-                plt.plot(freq,SPR)
-                plt.legend(sigma,title=r'Thrshld ($\sigma$)')
-            else:
-                plt.plot(freq,SPR,color=cmap(norm(Tar[i])))
-                percrej[i] = 100*matfl['nrrejectedmed'][0,ind][Pind,Tind][0,0]/32
-            plt.xscale('log')
-        if not sepT:
-            plt.title(r'KID{}, $P_{{read}}=$-{} dBm, {}$\sigma$'.format(
-                KIDnum,Pread,sigma[j]))
-            plt.ylim(-130,-50)
-            clb = plt.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
-            clb.ax.set_title('T (mK)')
-            plt.subplot(1,2,2)
-            plt.title('Rejection Percentage')
-            plt.plot(Tar,percrej)
-            plt.xlabel('Temperature (mK)')
-            plt.ylabel('%')
-            plt.ylim(0,100)
-            plt.tight_layout()
-            
+          
 def Qif0(Chipnum,KIDnum,color='Pread',Tmax=.5,pltPread='all',fracfreq=False,
         fig=None,ax12=None):
+    '''Plot the internal quality factor and resonance frequency from S21-measurement.
+    The color gives different read powers, but can be set to Pint as well.
+    If fracfreq is True, the y-axis is df/f0, instead of f0.'''
     dfld = io.get_datafld()
     if fig is None or ax12 is None:
         fig,axs = plt.subplots(1,2,figsize=(12,4))
@@ -590,6 +547,16 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         N0 = 1.72e4,
         kbTD = 37312.0,
         kb = 86.17):
+    '''Plots the number of quasiparticle calculated from the noise levels and lifetimes from PSDs.
+    options similar to options in ltnlvl.
+    TODO: delete double code in ltnlvl and Nqp
+    
+    pltThrm -- also plot thermal line (needs constants)
+    pltNqpQi -- plot Nqp from Qi as well (needs constants)
+        splitT -- makes NqpQi line dashed below this T
+    pltNqptau -- plot Nqp from lifetime only (need constants)
+    nqpaxis -- also shows density on right axis.
+    '''
     TDparam = io.get_grTDparam(Chipnum)
     if ax is None or fig is None:
         fig,ax = plt.subplots()       
@@ -647,7 +614,8 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         dataline = ax.errorbar(Temp[mask],Nqp[mask],yerr=Nqperr[mask],
                     color=clr,marker='o',mec='k',capsize=2.,label=label)
         if pltNqptau:
-            Nqp_ = S21data[0,14]*calc.nqpfromtau(taut,Chipnum,KIDnum,tescPread=tescPread)
+            tesc = calc.tesc(Chipnum,KIDnum,Pread=tescPread)
+            Nqp_ = S21data[0,14]*kidcalc.nqpfromtau(taut,tesc,kb*S21data[0,21])
             tauline, = ax.plot(Temp[mask],Nqp_[mask],
                    color=clr,zorder=len(ax.lines)+1,
                     label='$\\tau_{qp}^*$')
@@ -697,6 +665,7 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         clb.ax.set_position([l+.12,b,w,h])
     
 def Qfactors(Chipnum,KIDnum,Pread=None,ax=None):
+    '''Plots Ql, Qi and Qc over temperature in one figure.'''
     S21data = io.get_S21data(Chipnum,KIDnum,Pread)
     T = S21data[:,1]*1e3
     
@@ -711,6 +680,7 @@ def Qfactors(Chipnum,KIDnum,Pread=None,ax=None):
     ax.legend()
 
 def f0(Chipnum,KIDnum,Pread=None,ax=None):
+    '''Plots resonance frequency over temperature'''
     S21data = io.get_S21data(Chipnum,KIDnum,Pread)
     T = S21data[:,1]*1e3
     
@@ -722,6 +692,7 @@ def f0(Chipnum,KIDnum,Pread=None,ax=None):
     ax.ticklabel_format(useOffset=False)
 
 def Qfactorsandf0(Chipnum,KIDnum,Pread=None,fig=None,ax12=None):
+    '''Plots both Qfactors and resonance frequency over temperature in one figure'''
     if ax12 is None or fig is None:
         fig,ax12 = plt.subplots(1,2,figsize=(9,3))
     fig.suptitle('{}, KID{}, -{} dBm'.format(Chipnum,KIDnum,Pread))
@@ -730,6 +701,7 @@ def Qfactorsandf0(Chipnum,KIDnum,Pread=None,fig=None,ax12=None):
     fig.tight_layout(rect=(0,0,1,.9))
     
 def Powers(Chipnum,KIDnum,Pread=None,ax=None):
+    '''Plots the read power, internal power and absorbed power over temperature in one figure'''
     S21data = io.get_S21data(Chipnum,KIDnum,Pread)
 
     if ax is None:
@@ -748,6 +720,10 @@ def Powers(Chipnum,KIDnum,Pread=None,ax=None):
 
 def PowersvsT(Chipnum,KIDnum,density=False,phnum=False,
               fig=None,axs=None):
+    '''Plots the internal and absorbed powers over temperature, for different read powers (color). 
+    Options:
+    Density -- the powers are devided by the superconductor volume
+    phnum -- the powers are expressed in resonator photon occupations'''
     if axs is None or fig is None:
         fig,axs = plt.subplots(1,2,figsize=(10,4))
     Preadar = io.get_S21Pread(Chipnum,KIDnum)
@@ -794,6 +770,7 @@ def PowersvsT(Chipnum,KIDnum,density=False,phnum=False,
     
     
 def Nphres(Chipnum,KIDnum,Pread=None,ax=None,label=None):
+    '''Plots the number of resonator photons in the resonator over temperature.'''
     S21data = io.get_S21data(Chipnum,KIDnum,Pread)
 
     if ax is None:
@@ -813,6 +790,7 @@ def Nphres(Chipnum,KIDnum,Pread=None,ax=None,label=None):
     ax.set_yscale('log')
     
 def Nphabsres(Chipnum,KIDnum,Pread=None,ax=None,label=None):
+    '''Plots the number of absorbed resonator photons over temperature.'''
     S21data = io.get_S21data(Chipnum,KIDnum,Pread)
     if ax is None:
         fig,ax = plt.subplots()

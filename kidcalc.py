@@ -1,20 +1,24 @@
+'''This module implements usefull superconducting theory, 
+needed to predict KID behaviour and quasiparticle dynamics. 
+Based on the PhD thesis of PdV.
+If required, units are in micro: µeV, µm, µs etc.'''
+
 import numpy as np
 import scipy.integrate as integrate
 from scipy import interpolate
 from scipy.optimize import minimize_scalar as minisc
 import warnings
 
-
-# Fermi-Dirac distribution
 def f(E, kbT):
+    '''The Fermi-Dirac distribution.'''
     with np.errstate(over='raise',under='ignore'):
         try:
             return 1 / (1 + np.exp(E/kbT))
-        except FloatingPointError:
+        except FloatingPointError: #use low temperature approx. if normal fails.
             return np.exp(-E/kbT)
 
-# Calculation for complex conductivity
 def cinduct(hw, D, kbT):
+    '''Mattis-Bardeen equations.'''
     def integrand11(E, hw, D, kbT):
         nume = 2 * (f(E, kbT) - f(E + hw, kbT)) * (E ** 2 + D ** 2 + hw * E)
         deno = hw * ((E ** 2 - D ** 2) * ((E + hw) ** 2 - D ** 2)) ** 0.5
@@ -38,12 +42,20 @@ def cinduct(hw, D, kbT):
     return s1,s2
 
 def Vsc(kbTc,N0,kbTD):
-    D0 = 1.76*kbTc
+    '''Calculates the superconducting coupling strength in BSC-theory 
+    from the BSC relation 2D=3.52kbTc.'''
+    D0 = 1.76*kbTc # BSC-relation
     def integrand1(E, D):
         return 1/np.sqrt(E**2-D**2)
     return 1/(integrate.quad(integrand1, D0, kbTD,
                                  args=(D0,))[0]*N0)
+
 def load_Ddata(N0,kbTc,kbTD,kb=86.17):
+    '''To speed up the calculation for Delta, an interpolation of generated values is used.
+    Ddata_{SC}_{Tc}.npy contains this data, where a new one is needed 
+    for each superconductor (SC) and crictical temperature (Tc).
+    This function returns the Ddata array.'''
+    
     Ddataloc = 'C:/Users/stevendr/Google Drive/SRON/Projects/Coding/'
     if (N0 == 1.72e4) & (kbTD == 37312.0):
         SC = 'Al'
@@ -63,8 +75,9 @@ def load_Ddata(N0,kbTc,kbTD,kb=86.17):
         Ddata = None
     return Ddata
 
-# Calculation for energy gap D
 def D(kbT, N0, kbTc, kbTD,kb=86.17):
+    '''Calculates the thermal average energy gap, Delta. Tries to load Ddata, 
+    but calculates from scratch otherwise. Then, it cannot handle arrays.  '''
     Ddata = load_Ddata(N0,kbTc,kbTD)
     if Ddata is not None:
         Dspl = interpolate.splrep(Ddata[0, :], Ddata[1, :], s=0)
@@ -85,8 +98,9 @@ def D(kbT, N0, kbTc, kbTD,kb=86.17):
         if res.success:
             return np.clip(res.x,0,None)
 
-# Calculation for n_qp
 def nqp(kbT, D, N0):
+    '''Thermal average quasiparticle denisty. It can handle arrays 
+    and uses a low temperature approximation, if appropriate.'''
     if (kbT<D/20).all():
         return 2*N0*np.sqrt(2*np.pi*kbT*D)*np.exp(-D/kbT)
     else:
@@ -103,9 +117,9 @@ def nqp(kbT, D, N0):
                     integrand, D[i], np.inf, args=(kbT[i], D[i], N0))[0]
             return result
             
-
-# Calculation for effective temperature
 def kbTeff(N_qp, N0, V, kbTc, kbTD):
+    '''Calculates the effective temperature (in µeV) at a certain 
+    number of quasiparticles.'''
     Ddata = load_Ddata(N0,kbTc,kbTD)
     if Ddata is not None:
         kbTspl = interpolate.splrep(Ddata[2,:],Ddata[0,:])
@@ -124,31 +138,47 @@ def kbTeff(N_qp, N0, V, kbTc, kbTD):
         if res.success:
             return res.x
     
-# Calculation of S21 and A,theta
 def beta(lbd0, d, D, D0, kbT):
+    '''calculates beta, a measure for how thin the film is, 
+    compared to the penetration depth.
+    d -- film thickness
+    D -- energy gap
+    D0 -- energy gap at T=0
+    kbT -- temperature in µeV'''
     lbd = lbd0 * 1 / np.sqrt(D / D0 * np.tanh(D / (2 * kbT)))
     return 1 + 2 * d / (lbd * np.sinh(2 * d / lbd))
 
 
 def Qi(s1, s2, ak, lbd0, d, D, D0, kbT):
+    '''Calculates the internal quality factor, 
+    from the complex conductivity. See PdV PhD thesis eq. (2.23)'''
     b = beta(lbd0, d, D, D0, kbT)
     return 2 * s2 / (ak * b * s1)
 
 
 def hwres(s2, hw0, s20, ak, lbd0, d, D, D0, kbT):
-    with np.errstate(all='raise'):
-        b = beta(lbd0, d, D, D0, kbT)
-        return hw0 * (
-            1 + ak * b / 4 / s20 * (s2 - s20)
-        )  # note that is a linearized approach
+    '''Gives the resonance frequency in µeV, from the sigma2,
+    from a linearization from point hw0,sigma20. See PdV PhD eq. (2.24)'''
+    b = beta(lbd0, d, D, D0, kbT)
+    return hw0 * (
+        1 + ak * b / 4 / s20 * (s2 - s20)
+    )  # note that is a linearized approach
 
 def S21(Qi, Qc, hwread, dhw, hwres):
+    '''Gives the complex transmittance of a capacatively coupled
+    superconducting resonator (PdV PhD, eq. (3.21)), with:
+    hwread -- the read out frequency
+    dhw -- detuning from hwread (so actual read frequency is hwread + dhw)
+    hwres -- resonator frequency'''
     Q = Qi * Qc / (Qi + Qc)
     dhw += hwread - hwres
     return (Q / Qi + 2j * Q * dhw / hwres) / (1 + 2j * Q * dhw / hwres)
 
-# Calculate hwread
 def hwread(hw0, kbT0, ak, lbd0, d, D_, D0, kbT, N0, kbTc, kbTD):
+    '''Calculates at which frequency, on probes at resonance. 
+    This must be done iteratively, as the resonance frequency is 
+    dependent on the complex conductivity, which in turn depends on the
+    read frequency.'''
     D_0 = D(kbT0, N0, kbTc, kbTD)
     s20 = cinduct(hw0, D_0, kbT0)[1]
 
@@ -166,8 +196,68 @@ def hwread(hw0, kbT0, ak, lbd0, d, D_, D0, kbT, N0, kbTc, kbTD):
     if res.success:
         return res.x
     
-#Number of subgap phonons with Debye:
 def calc_Nwsg(kbT,V,D,e):
+    '''Calculates the number of phonons with the Debye approximation, 
+    for Al.'''
     def integrand(E,kbT,V):
         return 3*V*E**2/(2*np.pi*(6.582e-4)**2*(6.3e3)**3*(np.exp(E/kbT)-1))
     return integrate.quad(integrand,e+D,2*D,args=(kbT,V))[0]
+
+def tau_kaplan(T,tesc=.14e-3, 
+               t0=.44,
+               kb = 86.17,
+               tpb = .28e-3,
+               N0 = 1.72e4,
+               kbTc = 1.2*86.17,
+               kbTD = 37312.0,):
+    '''Calculates the apparent quasiparticle lifetime from Kaplan. 
+    See PdV PhD eq. (2.29)'''
+    D0 = 1.76 * kbTc #BSC
+    D_ = D(kb*T, N0, kbTc, kbTD)
+    nqp_ = nqp(kb*T, D_, N0)
+    taukaplan = t0*N0*kbTc**3/(4*nqp_*D_**2)*(1+tesc/tpb) 
+    return taukaplan
+
+def kbTbeff(tqpstar,
+    V=1000,
+    t0=.44,
+    kb=86.17,
+    tpb=.28e-3,
+    N0=1.72e4,
+    kbTc = 1.2 * 86.17,
+    kbTD=37312.0,
+    tesc=0.14e-3,
+    plot=False):
+    '''Calculates the effective temperature, with a certian 
+    quasiparticle lifetime.'''
+    D0 = 1.76 * kbTc 
+    Nqp_0 = V * t0 * N0 * kbTc ** 3 / \
+        (2 * D0 ** 2 * tqpstar) * 0.5 * (1 + tesc / tpb)
+    
+    return kbTeff(Nqp_0, N0, V, kbTc, kbTD)
+
+def tesc(
+    kbT,
+    tqpstar,
+    t0=.44,
+    tpb=.28e-3,
+    N0=1.72e4,
+    kbTc=1.2 * 86.17,
+    kbTD=37312.0
+):
+    '''Calculates the phonon escape time, based on tqp* via Kaplan. Times are in µs.'''
+    
+    D_ = D(kbT,N0,kbTc,kbTD)
+    nqp_ = nqp(kbT, D_, N0)
+    return tpb*((4*tqpstar*nqp_*D_**2)/(t0*N0*kbTc**3)-1)
+
+def nqpfromtau(tau,
+               tesc=0,
+               kbTc=1.2*86.17,
+               t0=.44,
+               tpb=.28e-3,
+               kb=86.17,
+               N0=1.72e4):
+    '''Calculates the density of quasiparticles from the quasiparticle lifetime.'''
+    D_ = 1.76*kbTc
+    return t0*N0*kbTc**3/(2*D_**2*2*tau/(1+tesc/tpb))
