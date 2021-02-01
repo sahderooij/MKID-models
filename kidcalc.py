@@ -3,6 +3,7 @@ needed to predict KID behaviour and quasiparticle dynamics.
 Based on the PhD thesis of PdV.
 If required, units are in micro: µeV, µm, µs etc.'''
 
+import os
 import numpy as np
 import scipy.integrate as integrate
 from scipy import interpolate
@@ -56,7 +57,7 @@ def load_Ddata(N0,kbTc,kbTD,kb=86.17):
     for each superconductor (SC) and crictical temperature (Tc).
     This function returns the Ddata array.'''
     
-    Ddataloc = 'C:/Users/stevendr/Google Drive/SRON/Projects/Coding/'
+    Ddataloc = os.path.dirname(__file__)+ '/Ddata/'
     if (N0 == 1.72e4) & (kbTD == 37312.0):
         SC = 'Al'
     elif (N0 == 4.08e4) & (kbTD == 86.17*246):

@@ -39,24 +39,28 @@ def ak(S21data, lbd0=0.092, N0=1.72e4, kbTD=37312.0,plot=False,reterr=False,meth
     d = S21data[0, 25]
     kbTc = S21data[0,21] * 86.17
     D0 = 1.76 * kbTc
-
-    # Mask the double measured temperatures, and only fit from 250 mK
-    mask1 = np.zeros(len(y), dtype="bool")
-    mask1[np.unique(np.round(S21data[:, 1], decimals=2),
-                    return_index=True)[1]] = True
-    mask = np.logical_and(mask1, (kbT >= .25 * 86.17))
     
     # define y to fit:
     if method == 'df':
         y = (hw - hw0) / hw0
     elif method == 'Qi':
         y = 1/S21data[:,4] - 1/S21data[0,4]
-        
+    
+    
+    
+    # Mask the double measured temperatures, and only fit from 250 mK
+    mask1 = np.zeros(len(y), dtype="bool")
+    mask1[np.unique(np.round(S21data[:, 1], decimals=2),
+                    return_index=True)[1]] = True
+    mask = np.logical_and(mask1, (kbT >= .25 * 86.17))
+    
     if mask.sum() > 3:
         y = y[mask]
     else:
         warnings.warn('Not enough high temperature S21data, taking the last 10 points')
         y = y[mask1][-10:]
+
+
     
     # define x to fit:
     x = np.zeros(len(y))
@@ -173,7 +177,7 @@ def tau_pulse(pulse,tfit=(10,1e3),reterr=False,plot=False):
     Returns:
     tau -- in µs
     optionally the fitting error'''
-    t = (np.arange(len(peakdata_ph)) - 500) 
+    t = (np.arange(len(pulse)) - 500) 
     fitmask = np.logical_and(t > tfit[0], t < tfit[1])
     t2 = t[fitmask]
     peak2 = pulse[fitmask]
@@ -193,7 +197,7 @@ def tau_pulse(pulse,tfit=(10,1e3),reterr=False,plot=False):
         return fit[0][0]
     
 def tesc(Chipnum,KIDnum,Pread='max',
-              minTemp=300,maxTemp=400,taunonkaplan=2e3,taures=1e1,relerrthrs=.2,
+              minTemp=200,maxTemp=400,taunonkaplan=2e2,taures=1e1,relerrthrs=.2,
               pltfit=False,pltkaplan=False,reterr=False,
     t0=.44,
     kb=86.17,
@@ -217,9 +221,7 @@ def tesc(Chipnum,KIDnum,Pread='max',
     
     Temp = io.get_grTemp(TDparam,KIDnum,Pread)
     Temp = Temp[np.logical_and(Temp<maxTemp,Temp>minTemp)]
-    tescar = np.zeros(len(Temp))
-    tqpstar = np.zeros(len(Temp))
-    tqpstarerr = np.zeros(len(Temp))
+    tescar,tescarerr,tqpstar,tqpstarerr = np.zeros((4,len(Temp)))
     for i in range(len(Temp)):
         if pltfit:
             print('{} KID{} -{} dBm T={} mK'.format(
@@ -233,9 +235,13 @@ def tesc(Chipnum,KIDnum,Pread='max',
         else:
             tescar[i] = kidcalc.tesc(kb*Temp[i]*1e-3,tqpstar[i],
                              t0,tpb,N0,kbTc,kbTD)
+            tescarerr[i] = np.abs(kidcalc.tesc(kb*Temp[i]*1e-3,tqpstarerr[i],
+                             t0,tpb,N0,kbTc,kbTD)+tpb)
+            
     if tescar[~np.isnan(tescar)].size > 0:
         tesc1 = np.mean(tescar[~np.isnan(tescar)])
-        tescerr = np.std(tescar[~np.isnan(tescar)])
+        tescerr = np.sqrt(np.std(tescar[~np.isnan(tescar)])**2 + 
+                          ((tescarerr[~np.isnan(tescar)]/(~np.isnan(tescar)).sum())**2).sum())
     else:
         tesc1 = np.nan
 
@@ -249,9 +255,12 @@ def tesc(Chipnum,KIDnum,Pread='max',
         plt.errorbar(Temp,tqpstar,yerr=tqpstarerr,capsize=5.,fmt='o')
         mask = ~np.isnan(tescar)
         plt.errorbar(Temp[mask],tqpstar[mask],fmt='o')
-        T = np.linspace(Temp[~np.isnan(tqpstar)].min(),
-                   Temp[~np.isnan(tqpstar)].max(),100)
-        taukaplan = tau_kaplan(T*1e-3,tesc=tesc1,kbTc=kbTc)  
+        try:
+            T = np.linspace(Temp[~np.isnan(tqpstar)].min(),
+                       Temp[~np.isnan(tqpstar)].max(),100)
+        except ValueError:
+            T = np.linspace(minTemp,maxTemp,100)
+        taukaplan = kidcalc.tau_kaplan(T*1e-3,tesc=tesc1,kbTc=kbTc)  
         plt.plot(T,taukaplan)
         plt.yscale('log')
         plt.ylim(None,1e4)

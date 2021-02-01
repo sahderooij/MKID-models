@@ -493,7 +493,7 @@ def init_KID(Chipnum,KIDnum,Pread,Tbath,Teffmethod = 'GR',wvl = None,S21 = False
     V = S21data[0, 14]
     d = S21data[0, 25]
     kbTc = S21data[0,21] * kb
-    ak1 = calc.ak(S21data,lbd0,N0,kbTD)[0]
+    ak1 = calc.ak(S21data,lbd0,N0,kbTD)
     
     tesc1 = calc.tesc(Chipnum,KIDnum,t0=t0,kb=kb,tpb=tpb,N0=N0,kbTD=kbTD)
     
@@ -505,18 +505,19 @@ def init_KID(Chipnum,KIDnum,Pread,Tbath,Teffmethod = 'GR',wvl = None,S21 = False
             taut[i] = calc.tau(freq,SPR)[0]
         tauspl = interpolate.splrep(Temp[~np.isnan(taut)],taut[~np.isnan(taut)])
         tau1 = interpolate.splev(Tbath,tauspl)
-        kbT = kidcalc.kbTbeff(tau1,V=V,kbTc=kbTc,t0,kb,tpb,N0,kbTD,tesc1)
+        kbT = kidcalc.kbTbeff(tau1,V=V,kbTc=kbTc,
+                              t0=t0,kb=kb,tpb=tpb,N0=N0,kbTD=kbTD,tesc=tesc1)
     elif Teffmethod == 'pulse':
         peakdata_ph,peakdata_amp = io.get_pulsedata(Chipnum,KIDnum,Pread,Tbath,wvl)
         tau1 = calc.tau_pulse(peakdata_ph)
-        kbT = kidcalc.kbTbeff(tau1,V=V,kbTc=kbTc,t0,kb,tpb,N0,kbTD,tesc1)
+        kbT = kidcalc.kbTbeff(tau1,V=V,kbTc=kbTc,t0=t0,kb=kb,tpb=tpb,N0=N0,kbTD=kbTD,tesc=tesc1)
     elif Teffmethod == 'Tbath':
         kbT = Tbath*1e-3*kb
     
     if S21:
-        return KID.S21KID(S21data,
+        return S21KID(S21data,
             Qc=Qc,hw0=hw0,kbT0=kbT0,kbT=kbT,V=V,
                           ak=ak1,d=d,kbTc=kbTc,tesc=tesc1)
     else:
-        return KID.KID(
+        return KID(
             Qc=Qc, hw0=hw0, kbT0=kbT0, kbT=kbT, V=V, ak=ak1, d=d, kbTc = kbTc,tesc = tesc1)
