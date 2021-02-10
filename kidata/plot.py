@@ -263,7 +263,6 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
         for Pread in Preadar:
             Temp = np.trim_zeros(io.get_grTemp(TDparam,KIDnum,Pread))
             if lvlcomp != '':
-                
                 S21data = io.get_S21data(Chipnum,KIDnum,Pread)
                 if 'ak' in lvlcomp:
                     akin = calc.ak(S21data)
@@ -357,7 +356,7 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                 Pint = 10*np.log10(10**(-1*Pread/10)*S21data[0,2]**2/S21data[0,3]/np.pi)
             else:
                 sqrtlvlcompspl = interpolate.splrep(
-                        Temp,np.ones(len(Temp)))
+                        np.linspace(Temp.min(),Temp.max(),10),np.ones(10))
             
             
             if suboffres:

@@ -94,7 +94,8 @@ def ak(S21data, lbd0=0.092, N0=1.72e4, kbTD=37312.0,plot=False,reterr=False,meth
     else:
         return fit[0][0]
 
-def tau(freq, SPR, startf = None, stopf = None,plot=False,retfnl = False):
+def tau(freq, SPR, startf = None, stopf = None,decades=3,minf=1e2,
+        plot=False,retfnl = False):
     '''Fits a Lorentzian to a PSD.
     Arguments:
     freq -- frequency array (in Hz)
@@ -123,7 +124,7 @@ def tau(freq, SPR, startf = None, stopf = None,plot=False,retfnl = False):
         except ValueError:
             stopf = 25e4
     if startf is None:
-        startf = max(10**(np.log10(stopf)-3),1e2)
+        startf = max(10**(np.log10(stopf)-decades),minf)
     
     # fitting a Lorentzian
     fitmask = np.logical_and(freq >= startf, freq <= stopf)

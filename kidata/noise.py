@@ -172,6 +172,8 @@ def do_TDanalysis(Chipnum,
         resultpath = io.get_datafld()+f'{Chipnum}/NoiseTDanalyse/'
     
     #find all KIDs, Read powers and Temperatures
+    assert glob.glob(io.get_datafld() + f'{Chipnum}/Noise_vs_T/TD_2D/*.bin'), 'Data not found'
+    
     KIDPrT = np.array([[int(i.split('\\')[-1].split('_')[0][3:]),
                         int(i.split('\\')[-1].split('_')[1][:-3]),
                         int(i.split('\\')[-1].split('_')[4][3:-4])] 
