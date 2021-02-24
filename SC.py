@@ -1,0 +1,1 @@
+'''This module includes the physical constants needed for the calculations. Instances of the SC class containt superconductor specific constants, such as the Debye Temperature, Density of States at Fermi surface etc. '''

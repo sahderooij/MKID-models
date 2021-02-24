@@ -26,7 +26,8 @@ def del_ampNoise(freq,SPR,plot=False):
 #             SPRn -= SPRn[np.logical_and(freq>startr1,freq<stopr1)].max()
 #         else:
 #             SPRn -= SPRn[np.logical_and(freq>startr2,freq<stopr2)].min()
-    SPRn -= SPRn[-5]
+    if len(SPRn) > 5:
+        SPRn -= SPRn[-5]
     #filter positive 
     freqn = freq[SPRn>0]
     SPRn = SPRn[SPRn>0]

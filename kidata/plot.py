@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 
 import matplotlib
 from scipy import interpolate
+import scipy.constants as const
 import scipy.io
 
 from kidata import io
@@ -185,26 +186,30 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
         if color == 'Pread':
             cmap = matplotlib.cm.get_cmap('plasma')
             norm = matplotlib.colors.Normalize(-1.05*kwargs['Preadar'].max(),-.95*kwargs['Preadar'].min())
-            clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
-            clb.ax.set_title(r'$P_{read}$ (dBm)')
+            if pltclrbar:
+                clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
+                clb.ax.set_title(r'$P_{read}$ (dBm)')
         elif color == 'Pint':
             cmap = matplotlib.cm.get_cmap('plasma')
             norm = matplotlib.colors.Normalize(kwargs['Pintar'].min()*1.05,kwargs['Pintar'].max()*.95)
-            clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
-            clb.ax.set_title(r'$P_{int}$ (dBm)')
+            if pltclrbar:
+                clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
+                clb.ax.set_title(r'$P_{int}$ (dBm)')
         elif color == 'V':
             cmap = matplotlib.cm.get_cmap('cividis')
             norm = matplotlib.colors.Normalize(
                 np.array(list(Vdict.values())).min(),
                 np.array(list(Vdict.values())).max())
-            clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
-            clb.ax.set_title(r'Al Vol. ($\mu m^3$)')
+            if pltclrbar:
+                clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
+                clb.ax.set_title(r'Al Vol. ($\mu m^3$)')
         elif color == 'KIDnum':
             cmap = matplotlib.cm.get_cmap('Paired')
             norm = matplotlib.colors.Normalize(np.array(KIDlist).min(),
                                                np.array(KIDlist).max())
-            clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
-            clb.ax.set_title('KID nr.')
+            if pltclrbar:
+                clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap))
+                clb.ax.set_title('KID nr.')
         else:
             raise ValueError('{} is not a valid variable as color'.format(color))
         return cmap,norm
@@ -295,8 +300,8 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                         S21data[:,1]*1e3,
                         S21data[:,2]*akin/np.sqrt(V*\
                                                    (1+tesc_/.28e-3)*\
-                                                (86.17*S21data[0,21])**3/\
-                                                   (S21data[0,15]/1.6e-19*1e6)**2),s=0)
+                                                (const.Boltzmann/const.e*1e6*S21data[0,21])**3/\
+                                                   (S21data[0,15]/const.e*1e6)**2),s=0)
                 elif lvlcomp == 'Resp':            
                     sqrtlvlcompspl = Respspl
                     
@@ -337,14 +342,14 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                         interpolate.splev(S21data[:,1]*1e3,
                                           Respspl)*np.sqrt(V),s=0)
                 elif lvlcomp == 'RespVtescTc':   
-                    kbTc = 86.17*S21data[0,21]
+                    kbTc = const.Boltzmann/const.e*1e6*S21data[0,21]
                     sqrtlvlcompspl = interpolate.splrep(
                         S21data[:,1]*1e3,
                         interpolate.splev(S21data[:,1]*1e3,
                                           Respspl)*\
                         np.sqrt(V*(1+tesc_/.28e-3)*\
                                 (kbTc)**3/\
-                                (kidcalc.D(86.17*S21data[:,1],1.72e4,kbTc,37312.))**2),s=0)
+                                (kidcalc.D(const.Boltzmann/const.e*1e6*S21data[:,1],1.72e4,kbTc,37312.))**2),s=0)
                 elif lvlcomp == 'RespLowT':
                     sqrtlvlcompspl = interpolate.splrep(
                         S21data[:,1]*1e3,np.ones(len(S21data[:,1]))*\
@@ -425,8 +430,8 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                     Tstartstop = (Temp[mask].min(),Temp[mask].max())
                 Ttemp = np.linspace(*Tstartstop,100)
                 explvl = interpolate.splev(Ttemp,Respspl)**2
-                explvl *= 4*.44e-6*S21data[0,14]*1.72e4*(86.17*S21data[0,21])**3/\
-                (2*(S21data[0,15]/1.602e-19*1e6)**2)*(1+tesc_/.28e-3)/2
+                explvl *= 4*.44e-6*S21data[0,14]*1.72e4*(const.Boltzmann/const.e*1e6*S21data[0,21])**3/\
+                (2*(S21data[0,15]/const.e*1e6)**2)*(1+tesc_/.28e-3)/2
                 explvl /= interpolate.splev(Ttemp,sqrtlvlcompspl)**2
                 thlvlplot, = axs[1].plot(Ttemp,10*np.log10(explvl),
                                          color=clr,linestyle='--',linewidth=2.)
@@ -438,7 +443,7 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                 else:
                     Tstartstop = (Temp[mask].min(),Temp[mask].max())
                 T = np.linspace(*Tstartstop,100)*1e-3
-                taukaplan = kidcalc.tau_kaplan(T,tesc=tesc_,kbTc=86.17*S21data[0,21])
+                taukaplan = kidcalc.tau_kaplan(T,tesc=tesc_,kbTc=const.Boltzmann/const.e*1e6*S21data[0,21])
                 kaplanfit, = axs[0].plot(T*1e3,taukaplan,color=clr,linestyle='--',linewidth=2.)
                 axs[0].legend((kaplanfit,),('Kaplan',))
                 
@@ -448,7 +453,7 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                     T = np.linspace(Temp[mask].min(),Temp[mask].max(),100)
                     Nqp = np.zeros(len(T))
                     for i in range(len(T)):
-                        Nqp[i] = V*nqp(T[i]*86.17*1e-3,S21data[0,15]/1.602e-19*1e6,1.72e4)
+                        Nqp[i] = V*nqp(T[i]*1e-3*const.Boltzmann/const.e*1e6,S21data[0,15]/const.e*1e6,1.72e4)
                     thmfnl = 4*interpolate.splev(T,tauspl)*1e-6*\
                         Nqp*interpolate.splev(T,Respspl)**2
                     thmfnl /= interpolate.splev(T,sqrtlvlcompspl)**2
@@ -544,8 +549,7 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         pltThrm=True,pltNqpQi=False,splitT=0,pltNqptau=False,tescPread='max',nqpaxis=True,
         fig=None,ax=None,label=None,clr=None,
         N0 = 1.72e4,
-        kbTD = 37312.0,
-        kb = 86.17):
+        kbTD = 37312.0):
     '''Plots the number of quasiparticle calculated from the noise levels and lifetimes from PSDs.
     options similar to options in ltnlvl.
     TODO: delete double code in ltnlvl and Nqp
@@ -614,7 +618,7 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
                     color=clr,marker='o',mec='k',capsize=2.,label=label)
         if pltNqptau:
             tesc = calc.tesc(Chipnum,KIDnum,Pread=tescPread)
-            Nqp_ = S21data[0,14]*kidcalc.nqpfromtau(taut,tesc,kb*S21data[0,21])
+            Nqp_ = S21data[0,14]*kidcalc.nqpfromtau(taut,tesc,const.Boltzmann/const.e*1e6*S21data[0,21])
             tauline, = ax.plot(Temp[mask],Nqp_[mask],
                    color=clr,zorder=len(ax.lines)+1,
                     label='$\\tau_{qp}^*$')
@@ -638,8 +642,8 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         T = np.linspace(*ax.get_xlim(),100)
         NqpT = np.zeros(100)
         for i in range(len(T)):
-            D_ = kidcalc.D(kb*T[i]*1e-3, N0, kb*S21data[0,21], kbTD)
-            NqpT[i] = S21data[0,14]*kidcalc.nqp(kb*T[i]*1e-3, D_, N0)
+            D_ = kidcalc.D(const.Boltzmann/const.e*1e6*T[i]*1e-3, N0, const.Boltzmann/const.e*1e6*S21data[0,21], kbTD)
+            NqpT[i] = S21data[0,14]*kidcalc.nqp(const.Boltzmann/const.e*1e6*T[i]*1e-3, D_, N0)
         Thline, = ax.plot(T,NqpT,color='k',zorder=len(ax.lines)+1,label='Thermal $N_{qp}$')
     
     handles, labels = ax.get_legend_handles_labels()
@@ -736,11 +740,11 @@ def PowersvsT(Chipnum,KIDnum,density=False,phnum=False,
         Qc = S21data[:,3]
         Qi = S21data[:,4]
         T = S21data[:,1]*1e3
-        Pabs = 10**(S21data[0,7]/10)/2*4*Q**2/(Qi*Qc)*1e-3/1.602e-19
-        Pint = 10**(S21data[:,8]/10)*1e-3/1.602e-19
+        Pabs = 10**(S21data[0,7]/10)/2*4*Q**2/(Qi*Qc)*1e-3/const.e
+        Pint = 10**(S21data[:,8]/10)*1e-3/const.e
         if phnum:
-            Pabs /= 2*np.pi*6.582e-4*(S21data[:,5]*1e-6)**2
-            Pint /= 2*np.pi*6.582e-4*(S21data[:,5]*1e-6)**2
+            Pabs /= const.Planck/const.e*1e12*(S21data[:,5]*1e-6)**2
+            Pint /= onst.Planck/const.e*1e12*(S21data[:,5]*1e-6)**2
             
         if density:
             Pabs /= S21data[0,14]
@@ -779,9 +783,8 @@ def Nphres(Chipnum,KIDnum,Pread=None,ax=None,label=None):
     
     T = S21data[:,1]*1e3
     Pint = S21data[:,8] #dBm
-    hbar = 1.055e-25 #mJ µs
     w = 2*np.pi*S21data[:,5]*1e-6 #1/µs
-    Nphres = 2*np.pi*10**(Pint/10)/(hbar*w**2)
+    Nphres = 2*np.pi*10**(Pint/10)/(const.hbar*1e9*w**2)
 
     ax.plot(T,Nphres,label=label)
     ax.set_xlabel('Temperature (mK)')
@@ -801,9 +804,8 @@ def Nphabsres(Chipnum,KIDnum,Pread=None,ax=None,label=None):
     T = S21data[:,1]*1e3
     Pabs = 10*np.log(10**(S21data[0,7]/10)/2*4*Q**2/(Qi*Qc))
     
-    hbar = 1.055e-25 #mJ µs
     w = 2*np.pi*S21data[:,5]*1e-6 #1/µs
-    Nphabsres = 2*np.pi*10**(Pabs/10)/(hbar*w**2)*S21data[0,14]
+    Nphabsres = 2*np.pi*10**(Pabs/10)/(const.hbar*1e9*w**2)*S21data[0,14]
 
     ax.plot(T,Nphabsres,label=label)
 #     ax.plot(T,Pabs)

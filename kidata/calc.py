@@ -3,6 +3,7 @@ import warnings
 import matplotlib.pyplot as plt
 
 from scipy import integrate
+import scipyt.constants as const
 from scipy.optimize import curve_fit
 from scipy.optimize import minimize_scalar as minisc
 from scipy.special import k0,i0
@@ -31,13 +32,13 @@ def ak(S21data, lbd0=0.092, N0=1.72e4, kbTD=37312.0,plot=False,reterr=False,meth
     optionally: the error as well.'''
     
     # Extract relevant data
-    hw = S21data[:, 5] * 2 * np.pi * 0.6582 * 1e-9 #µeV
-    kbT = S21data[:, 1] * 86.17  #µeV
+    hw = S21data[:, 5] * const.Plack/const.e*1e6 #µeV
+    kbT = S21data[:, 1] * cost.Boltzmann/const.e*1e6  #µeV
 
     # Set needed constants
     hw0 = hw[0]
     d = S21data[0, 25]
-    kbTc = S21data[0,21] * 86.17
+    kbTc = S21data[0,21] * cost.Boltzmann/const.e*1e6
     D0 = 1.76 * kbTc
     
     # define y to fit:
@@ -52,7 +53,7 @@ def ak(S21data, lbd0=0.092, N0=1.72e4, kbTD=37312.0,plot=False,reterr=False,meth
     mask1 = np.zeros(len(y), dtype="bool")
     mask1[np.unique(np.round(S21data[:, 1], decimals=2),
                     return_index=True)[1]] = True
-    mask = np.logical_and(mask1, (kbT >= .25 * 86.17))
+    mask = np.logical_and(mask1, (kbT >= .25 * cost.Boltzmann/const.e*1e6))
     
     if mask.sum() > 3:
         y = y[mask]
@@ -201,7 +202,6 @@ def tesc(Chipnum,KIDnum,Pread='max',
               minTemp=200,maxTemp=400,taunonkaplan=2e2,taures=1e1,relerrthrs=.2,
               pltfit=False,pltkaplan=False,reterr=False,
     t0=.44,
-    kb=86.17,
     tpb=.28e-3,
     N0=1.72e4,
     kbTD=37312.0,
@@ -218,7 +218,7 @@ def tesc(Chipnum,KIDnum,Pread='max',
     Pread = _selectPread(Pread,io.get_grPread(TDparam,KIDnum))[0]
 
     kbTc = io.get_S21data(Chipnum,KIDnum,
-                       io.get_S21Pread(Chipnum,KIDnum)[0])[0,21]*kb
+                       io.get_S21Pread(Chipnum,KIDnum)[0])[0,21]*cost.Boltzmann/const.e*1e6
     
     Temp = io.get_grTemp(TDparam,KIDnum,Pread)
     Temp = Temp[np.logical_and(Temp<maxTemp,Temp>minTemp)]
@@ -234,9 +234,9 @@ def tesc(Chipnum,KIDnum,Pread='max',
         (tqpstar[i] > taunonkaplan or tqpstar[i] < taures):
             tescar[i] = np.nan
         else:
-            tescar[i] = kidcalc.tesc(kb*Temp[i]*1e-3,tqpstar[i],
+            tescar[i] = kidcalc.tesc(cost.Boltzmann/const.e*1e6*Temp[i]*1e-3,tqpstar[i],
                              t0,tpb,N0,kbTc,kbTD)
-            tescarerr[i] = np.abs(kidcalc.tesc(kb*Temp[i]*1e-3,tqpstarerr[i],
+            tescarerr[i] = np.abs(kidcalc.tesc(cost.Boltzmann/const.e*1e6*Temp[i]*1e-3,tqpstarerr[i],
                              t0,tpb,N0,kbTc,kbTD)+tpb)
             
     if tescar[~np.isnan(tescar)].size > 0:
@@ -251,6 +251,7 @@ def tesc(Chipnum,KIDnum,Pread='max',
             'tesc ({}) is not valid and set to {} µs. {}, KID{}'.format(
                 tesc1,defaulttesc,Chipnum,KIDnum))
         tesc1 = defaulttesc
+        tescerr = 0
     if pltkaplan:
         plt.figure()
         plt.errorbar(Temp,tqpstar,yerr=tqpstarerr,capsize=5.,fmt='o')
@@ -283,17 +284,17 @@ def get_tescdict(Chipnum,Pread='max'):
         tescdict[KIDnum] = tesc(Chipnum,KIDnum,Pread=Pread)
     return tescdict
 
-def NqpfromQi(S21data,uselowtempapprox=True,lbd0=0.092,kb=86.17,N0=1.72e4,kbTD=37312.0):
+def NqpfromQi(S21data,uselowtempapprox=True,lbd0=0.092,N0=1.72e4,kbTD=37312.0):
     '''Calculates the number of quasiparticles from the measured temperature dependence of Qi.
     Returns temperatures in K, along with the calculated quasiparticle numbers. 
     If uselowtempapprox, the complex impedence is calculated directly with a low 
     temperature approximation, else it\'s calculated with the cinduct function in kidcalc 
     (slow).''' 
     ak_ = ak(S21data)
-    hw = S21data[:, 5]*2*np.pi*6.582e-4*1e-6
+    hw = S21data[:, 5]*const.Plack/const.e*1e6
     d = S21data[0, 25]
-    kbTc = S21data[0,21] * kb
-    kbT = S21data[:,1]*kb
+    kbTc = S21data[0,21] * cost.Boltzmann/const.e*1e6
+    kbT = S21data[:,1]*cost.Boltzmann/const.e*1e6
     D0 = 1.76 * kbTc
     if uselowtempapprox:
         beta_ = beta(lbd0, d, D0, D0, kbT[0])
@@ -310,7 +311,7 @@ def NqpfromQi(S21data,uselowtempapprox=True,lbd0=0.092,kb=86.17,N0=1.72e4,kbTD=3
                          method='bounded')
             kbTeff = res.x
             Nqp[i] = S21data[0,14]*nqp(kbTeff,D0,N0)
-        return kbT/kb,Nqp
+        return kbT/(cost.Boltzmann/const.e*1e6),Nqp
     else:
         def minfunc(kbT,s2s1,hw,N0,kbTc,kbTD):
             D_ = D(kbT,N0,kbTc,kbTD)
@@ -328,5 +329,5 @@ def NqpfromQi(S21data,uselowtempapprox=True,lbd0=0.092,kb=86.17,N0=1.72e4,kbTD=3
             kbTeff = res.x
             D_ = D(kbTeff,N0,kbTc,kbTD)
             Nqp[i] = S21data[0,14]*nqp(kbTeff,D_,N0)
-        return kbT/kb,Nqp
+        return kbT/(cost.Boltzmann/const.e*1e6),Nqp
                    

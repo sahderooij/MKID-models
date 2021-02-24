@@ -1,11 +1,11 @@
-import numpy as np
-
 from kidata import io, calc, plot
-
 import kidcalc
+
+import numpy as np
 import scipy.integrate as integrate
 from scipy import interpolate
 from scipy.optimize import root
+import scipy.constants as const
 import matplotlib.pyplot as plt
 import matplotlib
 import warnings
@@ -14,7 +14,7 @@ def get_KIDparam(Chipnum,KIDnum,Pread,plottesc=False,
                  tescPread='max',tescrelerrthrs=.2):
     S21data = io.get_S21data(Chipnum,KIDnum,Pread)
     V = S21data[0,14]
-    kbTc = S21data[0,21]*86.17
+    kbTc = S21data[0,21]*const.Boltzmann/const.e*1e6
 
     tesc = calc.tesc(Chipnum,KIDnum,pltkaplan=plottesc,
                      Pread=tescPread,relerrthrs=tescrelerrthrs)
@@ -29,12 +29,11 @@ class Model:
         self.V = V
         self.kbTc = kbTc
         self.tesc = tesc
-        #Standard constants
+        #Standard constants for Al
         self.N0 = 1.72e4
         self.t0 = 440e-3
         self.tpb = .28e-3
         self.kbTD = 37312.
-        self.kb = 86.17
     
     def calc_spec(self,*args,lvlcal=1,startf=1,stopf=1e6,points=100,
                   retnumrates=False,PSDs='NN'):
@@ -85,7 +84,8 @@ class Model:
         norm = matplotlib.colors.Normalize(vmin=Temp.min(),vmax=Temp.max())
         for i in range(len(Temp)):
             if plotnumrates:
-                freq,swdB,nums,rates = self.calc_spec(*args,Temp[i]*self.kb,lvlcal=lvlcal,
+                freq,swdB,nums,rates = self.calc_spec(*args,Temp[i]*const.Boltzmann/const.e*1e6,
+                                                      lvlcal=lvlcal,
                                                       retnumrates=True,
                                                       PSDs=PSDs)
                 plt.figure('Nums')
@@ -99,7 +99,8 @@ class Model:
                     plt.plot(Temp[i],val,ratecol.pop(0)+'.')
                 
             else:
-                freq,swdB = self.calc_spec(*args,Temp[i]*self.kb,lvlcal=lvlcal,PSDs=PSDs)
+                freq,swdB = self.calc_spec(*args,Temp[i]*const.Boltzmann/const.e*1e6,
+                                           lvlcal=lvlcal,PSDs=PSDs)
 
             tau[i],tauerr[i],lvl[i],lvlerr[i] = calc.tau(freq,swdB,startf=1e0,stopf=1e5,
                                                              plot=False,retfnl=True)

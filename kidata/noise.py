@@ -125,6 +125,11 @@ def calc_avgPSD(dataarr,reject,dataarr1=None,reject1=None,sfreq=50e3):
         return f,psds.mean(0)
     else:
         warnings.warn('All parts are rejected, returning nans')
+        plt.figure()
+        t = np.arange(len(dataarr.flatten()))/sfreq
+        plt.plot(t,dataarr.flatten())
+        plt.plot(t,dataarr1.flatten())
+        plt.show();plt.close()
         return np.full([2,1],np.nan)
 
 def logsmooth(freq,psd,ppd):

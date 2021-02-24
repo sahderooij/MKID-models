@@ -189,7 +189,7 @@ def get_noisebin(Chipnum,KIDnum,Pread=None,T=None,freq='med'):
     if T is None:
         T = get_grTemp(get_grTDparam(Chipnum),KIDnum,Pread)[0]
     datafld = get_datafld()
-    path = datafld + f"{Chipnum}/Noise_vs_T/TD_2D/KID{KIDnum}_{Pread}dBm__TD{freq}_TmK{T}.bin"
+    path = datafld + f"{Chipnum}/Noise_vs_T/TD_2D/KID{int(KIDnum)}_{int(Pread)}dBm__TD{freq}_TmK{int(T)}.bin"
     return np.fromfile(path,dtype='>f8').reshape(-1,2)
 
 def get_grTDparam(Chipnum,version=None):
