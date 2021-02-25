@@ -2,11 +2,13 @@ import kidcalc
 from kidata import calc,io
 
 import numpy as np
+import SC
 import scipy.integrate as integrate
 from scipy import interpolate
 from scipy.integrate import odeint
 from scipy.optimize import minimize_scalar as minisc
 from scipy.optimize import curve_fit
+import scipy.constants as const
 import matplotlib.pyplot as plt
 import warnings
 
@@ -23,94 +25,70 @@ class KID(object):
                  hw0=5*.6582*2*np.pi,
                  kbT0=.2*86.17, 
                  kbT=.2*86.17, 
-                 V=1e3,
-                 ak=.0268, 
-                 d=.05, 
-                 tesc = .14e-3,
-                 kbTc = 1.2*86.17):
+                 ak=.0268,
+                 SC=SC.Al()):
         '''Attributes are defined here. hw0 and kbT0 give the resonance frequency
         at temperature T0, both in µeV, from which we linearize to calculate the 
         new resonance frequencies.'''
+        self.SC = SC
         self.Qc = Qc  # -
         self.hw0 = hw0  # µeV
         self.kbT0 = kbT0  # µeV
         self.kbT = kbT  # µeV
-        self.V = V  # µm^3
         self.ak = ak  # -
-        self.d = d  # µm
-        self.tesc = tesc  # µs 
-
-        # All for Al: (FUTURE: replace by SC-object)
-        self.kbTc = kbTc  # µeV
-        self.kbTD = 37312.  # µeV
-        self.t0 = 440e-3  # µs
-        self.tpb = .28e-3  # µs
-        self.lbd0 = .092  # µm
-        self.N0 = 1.72e4  # µeV^-1 µm^-3
-        self.epb = .6 - .4*np.exp(-self.tesc/self.tpb) # arbitary,
+        self.epb = .6 - .4*np.exp(-self.SC.tesc/self.SC.tpb) # arbitary,
         # see Guruswamy2014 for more details on pair-breaking efficiency
+        
+        
 
 # Calculated attributes
     @property
-    def D0(self):
-        '''Returns the energy gap at T=0, according to BSC'''
-        return 1.76*self.kbTc
-
-    @property
     def D_0(self):
         '''Energy gap at T'''
-        return kidcalc.D(self.kbT, self.N0, self.kbTc, self.kbTD)
+        return kidcalc.D(self.kbT, self.SC)
 
     @property  # takes 1.2s to calculate
     def hwread(self):
         '''Gives the read frequency such that it is equal to the resonance
         frequency.'''
-        return kidcalc.hwread(self.hw0, self.kbT0, self.ak,
-                              self.lbd0, self.d, self.D_0,
-                              self.D0, self.kbT, self.N0,
-                              self.kbTc, self.kbTD)
+        return kidcalc.hwread(self.hw0, self.kbT0, self.ak, self.kbT, self.D_0, self.SC)
 
     @property
     def Nqp_0(self):
-        return self.V*kidcalc.nqp(self.kbT, self.D_0, self.N0)
+        return self.SC.V*kidcalc.nqp(self.kbT, self.D_0, self.SC)
 
     @property
     def tqp_0(self):
-        return (self.V*self.t0*self.N0*self.kbTc**3 /
-                (2*self.D0**2*self.Nqp_0))
+        return (self.SC.V*self.SC.t0*self.SC.N0*self.SC.kbTc**3 /
+                (2*self.D_0**2*self.Nqp_0))
 
     @property
     def tqp_1(self):
-        return .5*self.tqp_0*(1+self.tesc/self.tpb)
+        return self.tqp_0*(1+self.SC.tesc/self.SC.tpb)/2
+    
     @property
     def Qi_0(self):
         hwread = self.hwread
         s_0 = kidcalc.cinduct(hwread, self.D_0, self.kbT)
-        return kidcalc.Qi(s_0[0], s_0[1], self.ak,
-                          self.lbd0, self.d, self.D_0, self.D0,
-                          self.kbT)
+        return kidcalc.Qi(s_0[0], s_0[1], self.ak,self.kbT,self.D_0,self.SC)
     @property
     def Q_0(self):
         return self.Qc*self.Qi_0/(self.Qc+self.Qi_0)
 
     @property
     def tres(self):
-        return 2*self.Q_0/(self.hwread/.6582e-3)
-
-    @property
-    def Vsc(self):
-        return kidcalc.Vsc(self.kbTc,self.N0,self.kbTD)
+        return 2*self.Q_0/(self.hwread/(const.hbar/const.e*1e12))
 
     @property
     def s20(self):
-        D_0 = kidcalc.D(self.kbT0, self.N0, self.kbTc, self.kbTD)
+        D_0 = kidcalc.D(self.kbT0, self.SC)
         return kidcalc.cinduct(self.hw0, D_0, self.kbT0)[1]
     
     def fit_epb(self,peakdata,wvl,*args,var='phase'):
         '''Sets the pair-breaking efficiency to match the maximum of 
         the predicted pulse the highest point of peakdata.'''
         peakheight = peakdata.max()
-        hwrad = 6.528e-4*2*np.pi*3e8/(wvl*1e-3)
+        hwrad = const.Planck/const.e*1e12*const.c/(wvl*1e-3)
         tres = self.tres
         def minfunc(epb,hwrad,tres,var,peakheight):
             self.epb = epb
@@ -129,7 +107,7 @@ class KID(object):
         generation term eta*P/D. '''
         R,V,G_B,G_es,N_w0 = self.calc_params()
         Nqp0 = np.sqrt(V*((1+G_B/G_es)*eta*P/self.D_0+2*G_B*N_w0)/R)
-        self.kbT = kidcalc.kbTeff(Nqp0,self.N0, V, self.kbTc, self.kbTD)
+        self.kbT = kidcalc.kbTeff(Nqp0,self.SC)
 
 # Calculation functions
     def rateeq(self,N,t,params):
@@ -142,12 +120,12 @@ class KID(object):
         return derivs
     
     def calc_params(self):
-        R = ((2*self.D0/self.kbTc)**3 /
-        (2*self.D0*2*self.N0*self.t0))  # µs^-1*um^3 (From Wilson2004 or 2.29)
-        G_B = 1/self.tpb  # µs^-1 (From chap8)
-        G_es = 1/self.tesc  # µs^-1 (From chap8)
-        N_w0 = R*self.Nqp_0**2*self.tpb/(2*self.V)  # arb.
-        return [R, self.V, G_B, G_es, N_w0]
+        R = ((2*self.SC.D0/self.SC.kbTc)**3 /
+        (2*self.SC.D0*2*self.SC.N0*self.SC.t0))  # µs^-1*um^3 (From Wilson2004 or 2.29)
+        G_B = 1/self.SC.tpb  # µs^-1 (From chap8)
+        G_es = 1/self.SC.tesc  # µs^-1 (From chap8)
+        N_w0 = R*self.Nqp_0**2*self.SC.tpb/(2*self.SC.V)  # arb.
+        return [R, self.SC.V, G_B, G_es, N_w0]
 
     def calc_Nqpevol(self, dNqp, tStop=None, tInc=None):
         if tStop is None:
@@ -179,16 +157,13 @@ class KID(object):
         return dNqpt+self.Nqp_0
 
     def calc_S21(self, Nqp, hwread, s20, dhw=0):
-        kbTeff = kidcalc.kbTeff(Nqp, self.N0, self.V, self.kbTc,
-                                self.kbTD)
-        D = kidcalc.D(kbTeff, self.N0, self.kbTc, self.kbTD)
+        kbTeff = kidcalc.kbTeff(Nqp, self.SC)
+        D = kidcalc.D(kbTeff, self.SC)
         
         s1, s2 = kidcalc.cinduct(hwread + dhw, D, kbTeff)
 
-        Qi = kidcalc.Qi(s1, s2, self.ak, self.lbd0, self.d, D,
-                        self.D0, self.kbT)
-        hwres = kidcalc.hwres(s2, self.hw0, s20, self.ak,
-                              self.lbd0, self.d, D,self.D0, self.kbT)
+        Qi = kidcalc.Qi(s1, s2, self.ak, kbTeff, D self.SC)
+        hwres = kidcalc.hwres(s2, self.hw0, s20, self.ak, kbTeff, D, self.SC)
         return kidcalc.S21(Qi, self.Qc, hwread, dhw, hwres)
 
     def calc_resp(self, Nqp, hwread, s20, D_0, dhw=0):
@@ -196,9 +171,7 @@ class KID(object):
         S21 = self.calc_S21(Nqp, hwread, s20, dhw)
         #Define circle at this temperature:
         s_0 = kidcalc.cinduct(hwread, D_0, self.kbT)
-        Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak,
-                          self.lbd0, self.d, D_0, self.D0,
-                          self.kbT)
+        Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak, self.kbT, D_0, self.SC)
         S21min = self.Qc/(self.Qc+Qi_0) #Q/Qi
         xc = (1+S21min)/2
         #translate S21 into this circle:
@@ -209,15 +182,12 @@ class KID(object):
 
     def calc_linresp(self, Nqp, hwread, D_0):
         s_0 = kidcalc.cinduct(hwread, D_0, self.kbT)
-        Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak,
-                          self.lbd0, self.d, D_0, self.D0,
-                          self.kbT)
+        Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak, self.kbT, D_0, self.SC)
         Q = Qi_0*self.Qc/(Qi_0+self.Qc)
-        beta = kidcalc.beta(self.lbd0, self.d, D_0, self.D0, self.kbT)
+        beta = kidcalc.beta(self.kbT,D_0,self.SC)
         
-        kbTeff = kidcalc.kbTeff(Nqp, self.N0, self.V, self.kbTc,
-                                self.kbTD)
-        D = kidcalc.D(kbTeff, self.N0, self.kbTc, self.kbTD)
+        kbTeff = kidcalc.kbTeff(Nqp, self.SC)
+        D = kidcalc.D(kbTeff, self.SC)
         s1, s2 = kidcalc.cinduct(hwread, D, kbTeff)
 
         lindA = self.ak*beta*Q*(s1 - s_0[0])/s_0[1]
@@ -302,9 +272,7 @@ class KID(object):
         s20 = self.s20
         
         s_0 = kidcalc.cinduct(hwread, D_0, self.kbT)
-        Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak,
-                          self.lbd0, self.d, D_0, self.D0,
-                          self.kbT)
+        Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak, self.kbT, D_0, self.SC)
         Q = Qi_0*self.Qc/(Qi_0+self.Qc)
         S21min = self.Qc/(self.Qc+Qi_0) #Q/Qi
         xc = (1+S21min)/2
@@ -437,29 +405,24 @@ class S21KID(KID):
                  hw0=5*.6582*2*np.pi,
                  kbT0=.2*86.17, 
                  kbT=.2*86.17, 
-                 V=1e3,
-                 ak=.0268, 
-                 d=.05, 
-                 tesc = .14e-3,
-                 kbTc = 1.2*86.17):
-        super().__init__(Qc,hw0,kbT0,kbT,V,ak,d,tesc,kbTc)
-        self.Qispl = interpolate.splrep(S21data[:,1]*86.17,S21data[:,4],s=0)
+                 ak=.0268,
+                SC=SC.Al()):
+        super().__init__(Qc,hw0,kbT0,kbT,ak,d,SC)
+        self.Qispl = interpolate.splrep(S21data[:,1]*const.Boltzmann/const.e*1e6,S21data[:,4],s=0)
 
     @property
     def Qi_0(self):
         return interpolate.splev(self.kbT,self.Qispl,ext=3)
     
     def calc_S21(self, Nqp, hwread, s20, dhw=0):
-        kbTeff = kidcalc.kbTeff(Nqp, self.N0, self.V, self.kbTc,
-                                self.kbTD)
-        D = kidcalc.D(kbTeff, self.N0, self.kbTc, self.kbTD)
+        kbTeff = kidcalc.kbTeff(Nqp, self.SC)
+        D = kidcalc.D(kbTeff, self.SC)
         
         s1, s2 = kidcalc.cinduct(hwread + dhw, D, kbTeff)
 
         Qi = interpolate.splev(kbTeff,self.Qispl)
 
-        hwres = kidcalc.hwres(s2, self.hw0, s20, self.ak,
-                              self.lbd0, self.d, D,self.D0, self.kbT)
+        hwres = kidcalc.hwres(s2, self.hw0, s20, self.ak,self.kbT,D,self.SC)
         return kidcalc.S21(Qi, self.Qc, hwread, dhw, hwres)
 
     def calc_resp(self, Nqp, hwread, s20, D_0, dhw=0):
@@ -475,28 +438,19 @@ class S21KID(KID):
         return S21, dA, theta
     
 ################################################################################
-def init_KID(Chipnum,KIDnum,Pread,Tbath,Teffmethod = 'GR',wvl = None,S21 = False,
-                t0=.44,
-                kb=86.17,
-                tpb=.28e-3,
-                N0=1.72e4,
-                kbTD=37312.0,
-                lbd0=.092):
+def init_KID(Chipnum,KIDnum,Pread,Tbath,Teffmethod = 'GR',wvl = None,S21 = False, SC_class=SC.Al):
     '''This returns an KID object, with the parameters initialized by 
     measurements on a physical KID. The effective temperature is set with an 
     lifetime measurement, either from GR noise (GR) or pulse (pulse)'''
     TDparam = io.get_grTDparam(Chipnum)
     S21data = io.get_S21data(Chipnum,KIDnum,Pread)
     Qc = S21data[0, 3]
-    hw0 = S21data[0, 5]*2*np.pi*6.582e-4*1e-6
-    kbT0 = kb * S21data[0, 1]
-    V = S21data[0, 14]
-    d = S21data[0, 25]
-    kbTc = S21data[0,21] * kb
-    ak1 = calc.ak(S21data,lbd0,N0,kbTD)
+    hw0 = S21data[0, 5]*const.Planck/const.e*1e12*1e-6
+    kbT0 = const.Boltzmann/const.e*1e6 * S21data[0, 1]
+    SC_inst = SC.init_SC(Chipnum,KIDnum,Pread,SC_class=SC_class)
     
-    tesc1 = calc.tesc(Chipnum,KIDnum,t0=t0,kb=kb,tpb=tpb,N0=N0,kbTD=kbTD)
-    
+    ak1 = calc.ak(S21data,SC_inst)
+        
     if Teffmethod == 'GR':
         Temp = io.get_grTemp(TDparam,KIDnum,Pread)
         taut = np.zeros(len(Temp))
@@ -505,19 +459,16 @@ def init_KID(Chipnum,KIDnum,Pread,Tbath,Teffmethod = 'GR',wvl = None,S21 = False
             taut[i] = calc.tau(freq,SPR)[0]
         tauspl = interpolate.splrep(Temp[~np.isnan(taut)],taut[~np.isnan(taut)])
         tau1 = interpolate.splev(Tbath,tauspl)
-        kbT = kidcalc.kbTbeff(tau1,V=V,kbTc=kbTc,
-                              t0=t0,kb=kb,tpb=tpb,N0=N0,kbTD=kbTD,tesc=tesc1)
+        kbT = kidcalc.kbTbeff(tau1,SC_inst)
     elif Teffmethod == 'pulse':
         peakdata_ph,peakdata_amp = io.get_pulsedata(Chipnum,KIDnum,Pread,Tbath,wvl)
         tau1 = calc.tau_pulse(peakdata_ph)
-        kbT = kidcalc.kbTbeff(tau1,V=V,kbTc=kbTc,t0=t0,kb=kb,tpb=tpb,N0=N0,kbTD=kbTD,tesc=tesc1)
+        kbT = kidcalc.kbTbeff(tau1,SC_inst)
     elif Teffmethod == 'Tbath':
-        kbT = Tbath*1e-3*kb
+        kbT = Tbath*1e-3*const.Boltzmann/const.e*1e6
     
     if S21:
         return S21KID(S21data,
-            Qc=Qc,hw0=hw0,kbT0=kbT0,kbT=kbT,V=V,
-                          ak=ak1,d=d,kbTc=kbTc,tesc=tesc1)
+            Qc=Qc,hw0=hw0,kbT0=kbT0,kbT=kbT,ak=ak1,SC=SC_inst)
     else:
-        return KID(
-            Qc=Qc, hw0=hw0, kbT0=kbT0, kbT=kbT, V=V, ak=ak1, d=d, kbTc = kbTc,tesc = tesc1)
+        return KID(Qc=Qc, hw0=hw0, kbT0=kbT0, kbT=kbT, ak=ak1, SC=SC_inst)

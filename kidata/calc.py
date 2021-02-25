@@ -3,42 +3,41 @@ import warnings
 import matplotlib.pyplot as plt
 
 from scipy import integrate
-import scipyt.constants as const
+import scipy.constants as const
 from scipy.optimize import curve_fit
 from scipy.optimize import minimize_scalar as minisc
 from scipy.special import k0,i0
 
 from kidcalc import D, beta, cinduct, hwread, hwres, kbTeff, nqp
 import kidcalc
+from SC import Al
 
 from kidata import io,filters
 from kidata.plot import _selectPread
 
 # NOTE: all units are in 'micro': µeV, µm, µs etc.
 
-def ak(S21data, lbd0=0.092, N0=1.72e4, kbTD=37312.0,plot=False,reterr=False,method='df'):
+def ak(S21data, SC=Al() ,plot=False,reterr=False,method='df'):
     '''Calculates the kinetic induction fraction, based on Goa2008, PhD Thesis. 
     Arguments:
     S21data -- the content of the .csv from the S21-analysis. 
-    lbd0 -- penetration depth at T=0 in µm (default: 0.092, Al)
-    N0 -- Density of states in µeV^{-1}µm^{-3} (default: 1.72e4, Al)
-    kbTD -- Debye Energy in µeV (default 37312.0, Al)
+    SC -- Superconductor object, from SC module, default: Al
     plot -- boolean to plot the fit over temperature.
     reterr -- boolean to return fitting error.
     method -- either df or Qi, which is fitted linearly over temperature.
     
     Returns:
     ak 
-    optionally: the error as well.'''
+    optionally: the error in ak from fitting.'''
     
     # Extract relevant data
     hw = S21data[:, 5] * const.Plack/const.e*1e6 #µeV
-    kbT = S21data[:, 1] * cost.Boltzmann/const.e*1e6  #µeV
+    kbT = S21data[:, 1] * const.Boltzmann/const.e*1e6  #µeV
 
     # Set needed constants
     hw0 = hw[0]
     d = S21data[0, 25]
-    kbTc = S21data[0,21] * cost.Boltzmann/const.e*1e6
+    kbTc = S21data[0,21] * const.Boltzmann/const.e*1e6
     D0 = 1.76 * kbTc
     
     # define y to fit:
@@ -47,33 +46,29 @@ def ak(S21data, lbd0=0.092, N0=1.72e4, kbTD=37312.0,plot=False,reterr=False,meth
     elif method == 'Qi':
         y = 1/S21data[:,4] - 1/S21data[0,4]
     
-    
-    
     # Mask the double measured temperatures, and only fit from 250 mK
     mask1 = np.zeros(len(y), dtype="bool")
     mask1[np.unique(np.round(S21data[:, 1], decimals=2),
                     return_index=True)[1]] = True
-    mask = np.logical_and(mask1, (kbT >= .25 * cost.Boltzmann/const.e*1e6))
+    mask = np.logical_and(mask1, (kbT >= .25 * const.Boltzmann/const.e*1e6))
     
     if mask.sum() > 3:
         y = y[mask]
     else:
         warnings.warn('Not enough high temperature S21data, taking the last 10 points')
         y = y[mask1][-10:]
-
-
     
     # define x to fit:
     x = np.zeros(len(y))
     i = 0
-    s0 = cinduct(hw0, D(kbT[0], N0, kbTc, kbTD), kbT[0])
+    s0 = cinduct(hw0, D(kbT[0], SC), kbT[0])
     for kbTi in kbT[mask]:
-        D_0 = D(kbTi, N0, kbTc, kbTD)
+        D_0 = D(kbTi, SC)
         s = cinduct(hw[i], D_0, kbTi)
         if method == 'df':
-            x[i] = (s[1] - s0[1]) / s0[1] * beta(lbd0, d, D_0, D0, kbTi)/4
+            x[i] = (s[1] - s0[1]) / s0[1] * beta(kbTi,D_0,SC)/4
         elif method == 'Qi':
-            x[i] = (s[0] - s0[0]) / s0[1] * beta(lbd0, d, D_0, D0, kbTi)/2
+            x[i] = (s[0] - s0[0]) / s0[1] * beta(kbTi,D_0,SC)/2
         i += 1
     
     #do the fit:
@@ -198,27 +193,18 @@ def tau_pulse(pulse,tfit=(10,1e3),reterr=False,plot=False):
     else: 
         return fit[0][0]
     
-def tesc(Chipnum,KIDnum,Pread='max',
+def tesc(Chipnum,KIDnum,SC=Al(),usePread='max',
               minTemp=200,maxTemp=400,taunonkaplan=2e2,taures=1e1,relerrthrs=.2,
-              pltfit=False,pltkaplan=False,reterr=False,
-    t0=.44,
-    tpb=.28e-3,
-    N0=1.72e4,
-    kbTD=37312.0,
-    defaulttesc=0):
+              pltfit=False,pltkaplan=False,reterr=False,defaulttesc=0):
     '''Calculates the phonon escape time from the GR noise lifetimes and Kaplan.
     Uses data at Pread (default max), and temperatures between minTemp,maxTemp
     (default (300,400)). Only lifetimes between taunonkaplan and taures, and with
     a relative error threshold of relerrthrs are considered.
     The remaining lifetimes, tesc is calculated and averaged. The error (optional return) 
-    is the variance of the remaining lifetimes. If this fails, defaulttesc is returned.
-    TODO: replace this with a true fitting procedure.'''
+    is the variance of the remaining lifetimes. If this fails, defaulttesc is returned.'''
     
     TDparam = io.get_grTDparam(Chipnum)
-    Pread = _selectPread(Pread,io.get_grPread(TDparam,KIDnum))[0]
-
-    kbTc = io.get_S21data(Chipnum,KIDnum,
-                       io.get_S21Pread(Chipnum,KIDnum)[0])[0,21]*cost.Boltzmann/const.e*1e6
+    Pread = _selectPread(usePread,io.get_grPread(TDparam,KIDnum))[0]
     
     Temp = io.get_grTemp(TDparam,KIDnum,Pread)
     Temp = Temp[np.logical_and(Temp<maxTemp,Temp>minTemp)]
@@ -234,10 +220,9 @@ def tesc(Chipnum,KIDnum,Pread='max',
         (tqpstar[i] > taunonkaplan or tqpstar[i] < taures):
             tescar[i] = np.nan
         else:
-            tescar[i] = kidcalc.tesc(cost.Boltzmann/const.e*1e6*Temp[i]*1e-3,tqpstar[i],
-                             t0,tpb,N0,kbTc,kbTD)
-            tescarerr[i] = np.abs(kidcalc.tesc(cost.Boltzmann/const.e*1e6*Temp[i]*1e-3,tqpstarerr[i],
-                             t0,tpb,N0,kbTc,kbTD)+tpb)
+            tescar[i] = kidcalc.tesc(const.Boltzmann/const.e*1e6*Temp[i]*1e-3,tqpstar[i],SC)
+            tescarerr[i] = np.abs(kidcalc.tesc(const.Boltzmann/const.e*1e6*Temp[i]*1e-3,tqpstarerr[i],
+                             SC)+SC.tpb)
             
     if tescar[~np.isnan(tescar)].size > 0:
         tesc1 = np.mean(tescar[~np.isnan(tescar)])
@@ -252,6 +237,7 @@ def tesc(Chipnum,KIDnum,Pread='max',
                 tesc1,defaulttesc,Chipnum,KIDnum))
         tesc1 = defaulttesc
         tescerr = 0
+    SC.tesc = tesc1
     if pltkaplan:
         plt.figure()
         plt.errorbar(Temp,tqpstar,yerr=tqpstarerr,capsize=5.,fmt='o')
@@ -262,7 +248,7 @@ def tesc(Chipnum,KIDnum,Pread='max',
                        Temp[~np.isnan(tqpstar)].max(),100)
         except ValueError:
             T = np.linspace(minTemp,maxTemp,100)
-        taukaplan = kidcalc.tau_kaplan(T*1e-3,tesc=tesc1,kbTc=kbTc)  
+        taukaplan = kidcalc.tau_kaplan(T*1e-3,SC)  
         plt.plot(T,taukaplan)
         plt.yscale('log')
         plt.ylim(None,1e4)
@@ -276,7 +262,7 @@ def tesc(Chipnum,KIDnum,Pread='max',
         return tesc1
 
 def get_tescdict(Chipnum,Pread='max'):
-    '''Returns a dictionary with the escapetimes of all KIDs in a chip.'''
+    '''Returns a dictionary with the escape times of all KIDs in a chip.'''
     tescdict = {}
     TDparam = io.get_grTDparam(Chipnum)
     KIDlist = io.get_grKIDs(TDparam)
@@ -284,7 +270,7 @@ def get_tescdict(Chipnum,Pread='max'):
         tescdict[KIDnum] = tesc(Chipnum,KIDnum,Pread=Pread)
     return tescdict
 
-def NqpfromQi(S21data,uselowtempapprox=True,lbd0=0.092,N0=1.72e4,kbTD=37312.0):
+def NqpfromQi(S21data,uselowtempapprox=True,SC=Al()):
     '''Calculates the number of quasiparticles from the measured temperature dependence of Qi.
     Returns temperatures in K, along with the calculated quasiparticle numbers. 
     If uselowtempapprox, the complex impedence is calculated directly with a low 
@@ -292,12 +278,10 @@ def NqpfromQi(S21data,uselowtempapprox=True,lbd0=0.092,N0=1.72e4,kbTD=37312.0):
     (slow).''' 
     ak_ = ak(S21data)
     hw = S21data[:, 5]*const.Plack/const.e*1e6
-    d = S21data[0, 25]
-    kbTc = S21data[0,21] * cost.Boltzmann/const.e*1e6
-    kbT = S21data[:,1]*cost.Boltzmann/const.e*1e6
-    D0 = 1.76 * kbTc
+    kbT = S21data[:,1]*const.Boltzmann/const.e*1e6
+
     if uselowtempapprox:
-        beta_ = beta(lbd0, d, D0, D0, kbT[0])
+        beta_ = beta(kbT[0],SC.D0,SC)
         def minfunc(kbT,s2s1,hw,D0):
             xi = hw/(2*kbT)
             return np.abs(np.pi/4*((np.exp(D0/kbT)-2*np.exp(-xi)*i0(xi))/\
@@ -306,28 +290,28 @@ def NqpfromQi(S21data,uselowtempapprox=True,lbd0=0.092,N0=1.72e4,kbTD=37312.0):
         for i in range(len(kbT)):
             s2s1 = S21data[i,4]*(ak_*beta_)/2
             res = minisc(minfunc,
-                         args=(s2s1,hw[i],D0),
-                         bounds = (0,kbTc),
+                         args=(s2s1,hw[i],SC.D0),
+                         bounds = (0,SC.kbTc),
                          method='bounded')
             kbTeff = res.x
-            Nqp[i] = S21data[0,14]*nqp(kbTeff,D0,N0)
-        return kbT/(cost.Boltzmann/const.e*1e6),Nqp
+            Nqp[i] = S21data[0,14]*nqp(kbTeff,SC.D0,SC)
+        return kbT/(const.Boltzmann/const.e*1e6),Nqp
     else:
-        def minfunc(kbT,s2s1,hw,N0,kbTc,kbTD):
-            D_ = D(kbT,N0,kbTc,kbTD)
+        def minfunc(kbT,s2s1,hw,SC):
+            D_ = D(kbT,SC)
             s1,s2 = cinduct(hw, D_, kbT)
             return np.abs(s2s1-s2/s1)
         Nqp = np.zeros(len(kbT))
         for i in range(len(kbT)):
-            D_0 = D(kbT[i],N0,kbTc,kbTD)
-            beta_ = beta(lbd0, d, D_0, D0, kbT[i])
+            D_0 = D(kbT[i],SC)
+            beta_ = beta(lbd0, D_0, SC)
             s2s1 = S21data[i,4]*(ak_*beta_)/2
             res = minisc(minfunc,
-                         args=(s2s1,hw[i],N0,kbTc,kbTD),
-                         bounds = (0,kbTc),
+                         args=(s2s1,hw[i],SC),
+                         bounds = (0,SC.kbTc),
                          method='bounded')
             kbTeff = res.x
-            D_ = D(kbTeff,N0,kbTc,kbTD)
-            Nqp[i] = S21data[0,14]*nqp(kbTeff,D_,N0)
-        return kbT/(cost.Boltzmann/const.e*1e6),Nqp
+            D_ = D(kbTeff,SC)
+            Nqp[i] = S21data[0,14]*nqp(kbTeff,D_,SC)
+        return kbT/(const.Boltzmann/const.e*1e6),Nqp
                    

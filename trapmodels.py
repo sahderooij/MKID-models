@@ -10,30 +10,13 @@ import matplotlib.pyplot as plt
 import matplotlib
 import warnings
 
-def get_KIDparam(Chipnum,KIDnum,Pread,plottesc=False,
-                 tescPread='max',tescrelerrthrs=.2):
-    S21data = io.get_S21data(Chipnum,KIDnum,Pread)
-    V = S21data[0,14]
-    kbTc = S21data[0,21]*const.Boltzmann/const.e*1e6
-
-    tesc = calc.tesc(Chipnum,KIDnum,pltkaplan=plottesc,
-                     Pread=tescPread,relerrthrs=tescrelerrthrs)
-    return V,kbTc,tesc
-
 #####################################################################################
 ##################################### Models ########################################
 #####################################################################################
 
 class Model:
-    def __init__(self,V,kbTc,tesc):
-        self.V = V
-        self.kbTc = kbTc
-        self.tesc = tesc
-        #Standard constants for Al
-        self.N0 = 1.72e4
-        self.t0 = 440e-3
-        self.tpb = .28e-3
-        self.kbTD = 37312.
+    def __init__(self,SC):
+        self.SC = SC
     
     def calc_spec(self,*args,lvlcal=1,startf=1,stopf=1e6,points=100,
                   retnumrates=False,PSDs='NN'):
@@ -161,9 +144,9 @@ class Model:
         
 #################################### Rt ##################################################
 class Rt(Model):
-    def __init(self,V,kbTc,tesc):
+    def __init(self,SC):
+        super().__init__(SC)
         self.nrRateEqs = 1
-        super().__init__(V,kbTc,tesc)
     
     def rateeq(self,Ns,t,params):
         N = Ns
@@ -176,14 +159,14 @@ class Rt(Model):
         return -2*Rstar*N/V-2*Rtstar*NtT/V
     
     def calc_params(self,e,nrTraps,t1,xi,kbT):
-        D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
-        c = (nrTraps/self.V/(2*self.N0*D))
-        NT = kidcalc.nqp(kbT,D,self.N0)*self.V
-        NtT = self.V*2*self.N0*D*c/kidcalc.f(e,kbT)
-        R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
-        Rstar = R/(1+self.tesc/self.tpb)
-        Rtstar = xi*(1+e/D)/(t1*self.N0*D)
-        return [Rstar,self.V,NT,NtT,Rtstar]
+        D = kidcalc.D(kbT,self.SC)
+        c = (nrTraps/self.SC.V/(2*self.SC.N0*D))
+        NT = kidcalc.nqp(kbT,D,self.SC)*self.SC.V
+        NtT = self.SC.V*2*self.SC.N0*D*c/kidcalc.f(e,kbT)
+        R = (2*D/self.SC.kbTc)**3/(4*D*self.SC.N0*self.SC.t0)
+        Rstar = R/(1+self.SC.tesc/self.SC.tpb)
+        Rtstar = xi*(1+e/D)/(t1*self.SC.N0*D)
+        return [Rstar,self.SC.V,NT,NtT,Rtstar]
     
     def calc_MB(self,*args,retnumrates = False):
         params = self.calc_params(*args)
@@ -209,9 +192,10 @@ class Rt(Model):
 ####################################Trap Detrap############################################
 
 class TrapDetrap(Model):
-    def __init__(self,V,kbTc,tesc):
+    def __init__(self,SC):
+        super().__init__(SC)
         self.nrRateEqs = 3
-        super().__init__(V,kbTc,tesc)
+
     #Model equations
     def rateeq(self,Ns,t,params):
         N,Nt,Nw = Ns
@@ -228,14 +212,14 @@ class TrapDetrap(Model):
                 [R*N/V,0,-GB-Ges]]
     
     def calc_params(self,Gt,Gd,eta,P,kbT):
-        D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
-        NT = kidcalc.nqp(kbT,D,self.N0)*self.V
-        R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
-        Rstar = R/(1+self.tesc/self.tpb)
-        Ges = 1/self.tesc
-        GB = 1/self.tpb
-        NTw = R*NT**2/(2*self.V*GB)
-        return [R,self.V,GB,Gt,Gd,Ges,NTw,eta,P,D],NT,Rstar
+        D = kidcalc.D(kbT,self.SC)
+        NT = kidcalc.nqp(kbT,D,self.SC)*self.SC.V
+        R = (2*D/self.SC.kbTc)**3/(4*D*self.SC.N0*self.SC.t0)
+        Rstar = R/(1+self.SC.tesc/self.SC.tpb)
+        Ges = 1/self.SC.tesc
+        GB = 1/self.SC.tpb
+        NTw = R*NT**2/(2*self.SC.V*GB)
+        return [R,self.SC.V,GB,Gt,Gd,Ges,NTw,eta,P,D],NT,Rstar
     
     def calc_MB(self,Gt,Gd,eta,P,kbT,retnumrates = False):
         params,NT,Rstar = self.calc_params(Gt,Gd,eta,P,kbT)
@@ -264,20 +248,20 @@ class TrapDetrap(Model):
 ####################################Trap Detrap Kozo#######################################
 class TrapDetrapKozo(TrapDetrap):
     def calc_params(self,e,nrTraps,t1,t2,eta,P,kbT):
-        D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
-        NT = kidcalc.nqp(kbT,D,self.N0)*self.V
-        R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
-        Rstar = R/(1+self.tesc/self.tpb)
-        Ges = 1/self.tesc
-        GB = 1/self.tpb
-        NwT = R*NT**2/(2*self.V*GB)
-        Nqp0 = np.sqrt(self.V*((1+GB/Ges)*eta*P/D+2*GB*NwT)/R)
-        kbTeff = kidcalc.kbTeff(Nqp0,self.N0,self.V,self.Vsc,self.kbTD)
+        D = kidcalc.D(kbT,self.SC)
+        NT = kidcalc.nqp(kbT,D,self.SC)*self.SC.V
+        R = (2*D/self.SC.kbTc)**3/(4*D*self.SC.N0*self.SC.t0)
+        Rstar = R/(1+self.SC.tesc/self.SC.tpb)
+        Ges = 1/self.SC.tesc
+        GB = 1/self.SC.tpb
+        NwT = R*NT**2/(2*self.SC.V*GB)
+        Nqp0 = np.sqrt(self.SC.V*((1+GB/Ges)*eta*P/D+2*GB*NwT)/R)
+        kbTeff = kidcalc.kbTeff(Nqp0,self.SC)
         Gd = np.sqrt(np.pi)/4*(kbTeff/D)**(3/2)*np.exp(-(D-e)/kbTeff)*\
               (1/t1*(3+2*((D-e)/kbTeff))*kbTeff/D+4/t2*(1+(D-e)/kbTeff))
-        Gt = 2*(nrTraps/self.V/(2*self.N0*D))/t2*(1-e/D)*\
+        Gt = 2*(nrTraps/self.SC.V/(2*self.SC.N0*D))/t2*(1-e/D)*\
             (1/(np.exp((D-e)/kbTeff)-1)+1)*(1-1/(np.exp(e/kbTeff)+1))
-        return [R,self.V,GB,Gt,Gd,Ges,NwT,eta,P,D],NT,Rstar
+        return [R,self.SC.V,GB,Gt,Gd,Ges,NwT,eta,P,D],NT,Rstar
     
     def calc_MB(self,e,nrTraps,t1,t2,eta,P,kbT,retnumrates = False):
         params,NT,Rstar = self.calc_params(e,nrTraps,t1,t2,eta,P,kbT)
@@ -288,9 +272,9 @@ class TrapDetrapKozo(TrapDetrap):
             self.rateeq,[NT,NT/2,NwT],args=(t,params),
             tol=1e-12,jac=self.jac,method='hybr').x
         #M and B matrices
-        M = np.array([[Gt+2*Rstar*Nqp0/self.V,-Gd],
+        M = np.array([[Gt+2*Rstar*Nqp0/V,-Gd],
                       [-Gt,Gd]])
-        B = np.array([[Gt*Nqp0+Gd*Nt0+4*Rstar*Nqp0**2/self.V,-Gt*Nqp0-Gd*Nt0],
+        B = np.array([[Gt*Nqp0+Gd*Nt0+4*Rstar*Nqp0**2/V,-Gt*Nqp0-Gd*Nt0],
                       [-Gt*Nqp0-Gd*Nt0,Gt*Nqp0+Gd*Nt0]])  
         if retnumrates:
             return M,B,{'NqpT':NT,
@@ -305,9 +289,9 @@ class TrapDetrapKozo(TrapDetrap):
         
 ####################################Trap Detrap Ntmax ########################################
 class TrapDetrapNtmax(Model):
-    def __init__(self,V,kbTc,tesc):
+    def __init__(self,SC):
         self.nrRateEqs = 3
-        super().__init__(V,kbTc,tesc)
+        super().__init__(SC)
     #Model equations
     def rateeq(self,Ns,t,params):
         N,Nt,Nw = Ns
@@ -324,14 +308,14 @@ class TrapDetrapNtmax(Model):
                 [R*N/V,0,-GB-Ges]]
     
     def calc_params(self,Gt,Gd,Ntmax,eta,P,kbT):
-        D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
-        NT = kidcalc.nqp(kbT,D,self.N0)*self.V
-        R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
-        Rstar = R/(1+self.tesc/self.tpb)
-        Ges = 1/self.tesc
-        GB = 1/self.tpb
-        NTw = R*NT**2/(2*self.V*GB)
-        return [R,self.V,GB,Gt,Gd,Ntmax,Ges,NTw,eta,P,D],NT,Rstar
+        D = kidcalc.D(kbT,self.SC)
+        NT = kidcalc.nqp(kbT,D,self.SC)*self.SC.V
+        R = (2*D/self.SC.kbTc)**3/(4*D*self.SC.N0*self.SC.t0)
+        Rstar = R/(1+self.SC.tesc/self.SC.tpb)
+        Ges = 1/self.SC.tesc
+        GB = 1/self.SC.tpb
+        NTw = R*NT**2/(2*self.SC.V*GB)
+        return [R,self.SC.V,GB,Gt,Gd,Ntmax,Ges,NTw,eta,P,D],NT,Rstar
     
     def calc_MB(self,Gt,Gd,Ntmax,eta,P,kbT,retnumrates = False):
         params,NT,Rstar = self.calc_params(Gt,Gd,Ntmax,eta,P,kbT)
@@ -342,9 +326,9 @@ class TrapDetrapNtmax(Model):
             self.rateeq,[NT,NT/2,NTw],args=(t,params),
             tol=1e-12,jac=self.jac,method='hybr').x
         #M and B matrices
-        M = np.array([[Gt*(Ntmax-Nt0)+2*Rstar*Nqp0/self.V,-Gd-Gt*Nqp0],
+        M = np.array([[Gt*(Ntmax-Nt0)+2*Rstar*Nqp0/V,-Gd-Gt*Nqp0],
                       [-Gt*(Ntmax-Nt0),Gd+Gt*Nt0]])
-        B = np.array([[Gt*(Ntmax-Nt0)*Nqp0+Gd*Nt0+2*Rstar*(Nqp0**2+NT**2)/self.V,
+        B = np.array([[Gt*(Ntmax-Nt0)*Nqp0+Gd*Nt0+2*Rstar*(Nqp0**2+NT**2)/V,
                        -Gt*(Ntmax-Nt0)*Nqp0-Gd*Nt0],
                       [-Gt*(Ntmax-Nt0)*Nqp0-Gd*Nt0,
                        Gt*(Ntmax-Nt0)*Nqp0+Gd*Nt0]])  
@@ -354,9 +338,9 @@ class TrapDetrapNtmax(Model):
             return M,B
 ###################################Trap Detrap Rt##########################################
 class TrapDetrapRt(Model):
-    def __init__(self,V,kbTc,tesc):
+    def __init__(self,SC):
         self.nrRateEqs = 3
-        super().__init__(V,kbTc,tesc)
+        super().__init__(SC)
         
     #Model Equations
     def rateeq(self,Ns,t,params):
@@ -374,14 +358,14 @@ class TrapDetrapRt(Model):
                 [R*N/V,0,-GB-Ges]]
 
     def calc_params(self,Gt,Gd,Rt,eta,P,kbT):
-        D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
-        NT = kidcalc.nqp(kbT,D,self.N0)*self.V
-        R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
-        Rstar = R/(1+self.tesc/self.tpb)
-        Ges = 1/self.tesc
-        GB = 1/self.tpb
-        NTw = R*NT**2/(2*self.V*GB)
-        return [R,self.V,GB,Gt,Gd,Rt,Ges,NTw,eta,P,D],NT,Rstar
+        D = kidcalc.D(kbT,self.SC)
+        NT = kidcalc.nqp(kbT,D,self.SC)*self.SC.V
+        R = (2*D/self.SC.kbTc)**3/(4*D*self.SC.N0*self.SC.t0)
+        Rstar = R/(1+self.SC.tesc/self.SC.tpb)
+        Ges = 1/self.SC.tesc
+        GB = 1/self.SC.tpb
+        NTw = R*NT**2/(2*self.SC.V*GB)
+        return [R,self.SC.V,GB,Gt,Gd,Rt,Ges,NTw,eta,P,D],NT,Rstar
     
     def calc_MB(self,*args,retnumrates=False):
         params,NT,Rstar = self.calc_params(*args)
@@ -416,9 +400,9 @@ class TrapDetrapRt(Model):
             return M,B
 ####################################Trap Detrap Ntmax Rt ####################################
 class TrapDetrapNtmaxRt(Model):
-    def __init__(self,V,kbTc,tesc):
+    def __init__(selfS,SC):
         self.nrRateEqs = 3
-        super().__init__(V,kbTc,tesc)
+        super().__init__(SC)
     #Model equations
     def rateeq(self,Ns,t,params):
         N,Nt,Nw = Ns
@@ -435,14 +419,14 @@ class TrapDetrapNtmaxRt(Model):
                 [R*N/V ,0,-GB-Ges]]
     
     def calc_params(self,Gt,Gd,Ntmax,Rt,eta,P,kbT):
-        D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
-        NT = kidcalc.nqp(kbT,D,self.N0)*self.V
-        R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
-        Rstar = R/(1+self.tesc/self.tpb)
-        Ges = 1/self.tesc
-        GB = 1/self.tpb
-        NTw = R*NT**2/(2*self.V*GB)
-        return [R,self.V,GB,Gt,Gd,Ntmax,Rt,Ges,NTw,eta,P,D],NT,Rstar
+        D = kidcalc.D(kbT,self.SC)
+        NT = kidcalc.nqp(kbT,D,self.SC)*self.SC.V
+        R = (2*D/self.SC.kbTc)**3/(4*D*self.SC.N0*self.SC.t0)
+        Rstar = R/(1+self.SC.tesc/self.SC.tpb)
+        Ges = 1/self.SC.tesc
+        GB = 1/self.SC.tpb
+        NTw = R*NT**2/(2*self.SC.V*GB)
+        return [R,self.SC.V,GB,Gt,Gd,Ntmax,Rt,Ges,NTw,eta,P,D],NT,Rstar
     
     def calc_MB(self,*args,retnumrates = False):
         params,NT,Rstar = self.calc_params(*args)
@@ -487,9 +471,9 @@ class TrapDetrapNtmaxRt(Model):
             return M,B
 ####################################Trap Detrap Rt GBsg #################################
 class TrapDetrapRtThrm(Model):
-    def __init__(self,V,kbTc,tesc):
+    def __init__(self,SC):
         self.nrRateEqs = 2
-        super().__init__(V,kbTc,tesc)
+        super().__init__(SC)
     #Model equations
     def rateeq(self,Ns,t,params):
         N,Nt = Ns
@@ -507,14 +491,14 @@ class TrapDetrapRtThrm(Model):
                  -Rtstar*N/(2*V)-Gd]]
 
     def calc_params(self,e,nrTraps,Gt,Gd,xi,kbT):
-        D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
-        c = (nrTraps/self.V/(2*self.N0*D))
-        NT = kidcalc.nqp(kbT,D,self.N0)*self.V
-        NtT = self.V*2*self.N0*D*c*kidcalc.f(e,kbT)
-        R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
-        Rstar = R/(1+self.tesc/self.tpb)
+        D = kidcalc.D(kbT,self.SC)
+        c = (nrTraps/self.SC.V/(2*self.SC.N0*D))
+        NT = kidcalc.nqp(kbT,D,self.SC.N0)*self.SC.V
+        NtT = self.SC.V*2*self.SC.N0*D*c*kidcalc.f(e,kbT)
+        R = (2*D/self.SC.kbTc)**3/(4*D*self.SC.N0*self.SC.t0)
+        Rstar = R/(1+self.SC.tesc/self.SC.tpb)
         Rtstar = R*xi
-        return [Rstar,self.V,NT,NtT,Gt,Gd,Rtstar]
+        return [Rstar,self.SC.V,NT,NtT,Gt,Gd,Rtstar]
     
     def calc_MB(self,*args,retnumrates = False):
         params = self.calc_params(*args)
@@ -547,33 +531,33 @@ class TrapDetrapRtThrm(Model):
 ####################################Kozorzov############################################
 class Kozorezov(TrapDetrapRtThrm):
     def calc_params(self,e,nrTraps,t1,t2,xi,kbT):
-        D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
-        c = (nrTraps/self.V/(2*self.N0*D))
-        NT = kidcalc.nqp(kbT,D,self.N0)*self.V
-        NtT = self.V*2*self.N0*D*c*kidcalc.f(e,kbT)
-        R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
-        Rstar = R/(1+self.tesc/self.tpb)
-        Rtstar = xi/(t1*self.N0*D)*(1+e/D)
+        D = kidcalc.D(kbT,self.SC)
+        c = (nrTraps/self.SC.V/(2*self.SC.N0*D))
+        NT = kidcalc.nqp(kbT,D,self.SC)*self.SC.V
+        NtT = self.SC.V*2*self.SC.N0*D*c*kidcalc.f(e,kbT)
+        R = (2*D/self.SC.kbTc)**3/(4*D*self.SC.N0*self.SC.t0)
+        Rstar = R/(1+self.SC.tesc/self.SC.tpb)
+        Rtstar = xi/(t1*self.SC.N0*D)*(1+e/D)
         Gd = np.sqrt(np.pi)/4*(kbT/D)**(3/2)*np.exp(-(D-e)/kbT)*\
               (1/t1*(3+2*((D-e)/kbT))*kbT/D+4/t2*(1+(D-e)/kbT))
         Gt = 2*c/t2*(1-e/D)*\
             (1/(np.exp((D-e)/kbT)-1)+1)*(1-1/(np.exp(e/kbT)+1))
-        return [Rstar,self.V,NT,NtT,Gt,Gd,Rtstar]
+        return [Rstar,self.SC.V,NT,NtT,Gt,Gd,Rtstar]
 
 ####################################Kozorezov with Pread################################
 class KozorezovPread(TrapDetrapRt):
     def calc_params(self,e,nrTraps,t1,t2,xi,eta,P,kbT):
-        D = kidcalc.D(kbT,self.N0,self.kbTc,self.kbTD)
-        c = (nrTraps/self.V/(2*self.N0*D))
-        NT = kidcalc.nqp(kbT,D,self.N0)*self.V
-        R = (2*D/self.kbTc)**3/(4*D*self.N0*self.t0)
-        Rstar = R/(1+self.tesc/self.tpb)
-        Rtstar = xi/(t1*self.N0*D)*(1+e/D)
+        D = kidcalc.D(kbT,self.SC)
+        c = (nrTraps/self.SC.V/(2*self.SC.N0*D))
+        NT = kidcalc.nqp(kbT,D,self.SC)*self.SC.V
+        R = (2*D/self.SC.kbTc)**3/(4*D*self.SC.N0*self.SC.t0)
+        Rstar = R/(1+self.SC.tesc/self.SC.tpb)
+        Rtstar = xi/(t1*self.SC.N0*D)*(1+e/D)
         Gd = np.sqrt(np.pi)/4*(kbT/D)**(3/2)*np.exp(-(D-e)/kbT)*\
               (1/t1*(3+2*((D-e)/kbT))*kbT/D+4/t2*(1+(D-e)/kbT))
         Gt = 2*c/t2*(1-e/D)*\
             (1/(np.exp((D-e)/kbT)-1)+1)*(1-1/(np.exp(e/kbT)+1))
-        GB = 1/self.tpb
-        Ges = 1/self.tesc
-        NTw = R*NT**2/(2*self.V*GB)
-        return [R,self.V,GB,Gt,Gd,Rtstar,Ges,NTw,eta,P,D,],NT,Rstar
+        GB = 1/self.SC.tpb
+        Ges = 1/self.SC.tesc
+        NTw = R*NT**2/(2*self.SC.V*GB)
+        return [R,self.SC.V,GB,Gt,Gd,Rtstar,Ges,NTw,eta,P,D,],NT,Rstar
