@@ -9,7 +9,8 @@ Packages:
 Modules:
 - **KID** defines an KID object, which is used for to predict the single photon response of MKIDs
 - **kidcalc** implements all superconductor theory that governs MKIDs (mostly BSC, Mattis-Bardeen and Kaplan)
-- **trapmodels** is used for trapping models, based on modified Rothwarf-Taylor equations, in a attempt to explain the observed reduction in noise level.
+- **trapmodels** is used for trapping models, based on modified Rothwarf-Taylor equations, in a attempt to explain the observed reduction in noise level
+- **SC** contains physical constants of different superconductors, which is used through-out the repository.
 
 Data:
 - **Ddata** contains calculated gap energies over temperature for different $T_c$, to speed up the calculation of $\Delta(T)$.

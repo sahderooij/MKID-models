@@ -4,6 +4,7 @@ import scipy.constants as const
 import os
 import numpy as np
 
+#Parent class:
 class Superconductor(object):
     def __init__(self,name,Tc,TD,N0,t0,tpb,tesc,V,lbd0,d):
         self.name = name
@@ -55,7 +56,8 @@ class Superconductor(object):
         import kidata
         tesc = kidata.calc.tesc(Chipnum,KIDnum,self,**kwargs)
         self.tesc = tesc
-
+        
+#Sub-classes, which are the actual superconductors
 class Al(Superconductor):
     def __init__(self,Tc=1.2,tesc=.1e-3,V=1e3,lbd0=.092,d=.05):
         '''The default values should be adjusted per device, 
@@ -65,6 +67,10 @@ class Al(Superconductor):
 
 ###################################################################################
 def init_SC(Chipnum,KIDnum,SC_class=Al,set_tesc=True,**tesckwargs):
+    '''This function returns an SC instance (which is defined with the SC_class argument), 
+    with the parameters initialized from data. 
+    Tc, V, and thickness d are from the S21 measurement, and tesc is set with the 
+    set_tesc method which uses kidata.calc.tesc() to estimate the phonon escape time.'''
     import kidata
     S21data = kidata.io.get_S21data(Chipnum,KIDnum)
     SC_inst = SC_class(Tc=S21data[0,21],V=S21data[0,14],d=S21data[0,25])

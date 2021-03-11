@@ -22,23 +22,23 @@ def f(E, kbT):
 def cinduct(hw, D, kbT):
     '''Mattis-Bardeen equations.'''
     def integrand11(E, hw, D, kbT):
-        nume = 2 * (f(E, kbT) - f(E + hw, kbT)) * (E ** 2 + D ** 2 + hw * E)
+        nume = 2 * (f(E, kbT) - f(E + hw, kbT)) * np.abs(E ** 2 + D ** 2 + hw * E)
         deno = hw * ((E ** 2 - D ** 2) * ((E + hw) ** 2 - D ** 2)) ** 0.5
         return nume / deno
         
     def integrand12(E, hw, D, kbT):
-        nume = (1 - 2 * f(E + hw, kbT)) * (E ** 2 + D ** 2 + hw * E)
+        nume = (1 - 2 * f(E + hw, kbT)) * np.abs(E ** 2 + D ** 2 + hw * E)
         deno = hw * ((E ** 2 - D ** 2) * ((E + hw) ** 2 - D ** 2)) ** 0.5
         return nume / deno
 
     def integrand2(E, hw, D, kbT):
-        nume = (1 - 2 * f(E + hw, kbT)) * (E ** 2 + D ** 2 + hw * E)
+        nume = (1 - 2 * f(E + hw, kbT)) * np.abs(E ** 2 + D ** 2 + hw * E)
         deno = hw * ((D ** 2 - E ** 2) * ((E + hw) ** 2 - D ** 2)) ** 0.5
         return nume / deno
 
     s1 = integrate.quad(integrand11, D, np.inf, args=(hw, D, kbT))[0]
     if hw > 2 * D:
-        s1 -= integrate.quad(integrand12, D - hw, -D, args=(hw, D, kbT))[0]
+        s1 += integrate.quad(integrand12, D - hw, -D, args=(hw, D, kbT))[0]
     s2 = integrate.quad(integrand2, np.max(
         [D - hw, -D]), D,args=(hw, D, kbT))[0]
     return s1,s2

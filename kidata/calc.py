@@ -7,6 +7,7 @@ import scipy.constants as const
 from scipy.optimize import curve_fit
 from scipy.optimize import minimize_scalar as minisc
 from scipy.special import k0,i0
+from scipy import interpolate
 
 from kidcalc import D, beta, cinduct, hwread, hwres, kbTeff, nqp
 import kidcalc
@@ -17,7 +18,7 @@ from kidata.plot import _selectPread
 
 # NOTE: all units are in 'micro': µeV, µm, µs etc.
 
-def ak(S21data, SC=Al() ,plot=False,reterr=False,method='df'):
+def ak(S21data, SC=None ,plot=False,reterr=False,method='df'):
     '''Calculates the kinetic induction fraction, based on Goa2008, PhD Thesis. 
     Arguments:
     S21data -- the content of the .csv from the S21-analysis. 
@@ -30,15 +31,13 @@ def ak(S21data, SC=Al() ,plot=False,reterr=False,method='df'):
     ak 
     optionally: the error in ak from fitting.'''
     
+    if SC is None:
+        SC = Al(Tc=S21data[0,21],V=S21data[0,14],d=S21data[0,25])
+    
     # Extract relevant data
     hw = S21data[:, 5] * const.Plack/const.e*1e6 #µeV
     kbT = S21data[:, 1] * const.Boltzmann/const.e*1e6  #µeV
-
-    # Set needed constants
     hw0 = hw[0]
-    d = S21data[0, 25]
-    kbTc = S21data[0,21] * const.Boltzmann/const.e*1e6
-    D0 = 1.76 * kbTc
     
     # define y to fit:
     if method == 'df':
@@ -163,6 +162,154 @@ def tau(freq, SPR, startf = None, stopf = None,decades=3,minf=1e2,
     else:
         return tau,tauerr
     
+    
+def Respspl(Chipnum,KIDnum,Pread,phasemethod='f0',ampmethod='Qi',var='cross'):
+    '''Returns a spline representation of the responsivity (amp, phase or cross) vs Temperature (K).
+    Arguments:
+    Chipnum,KIDnum,Pread -- define the data to be taken (S21data, pulse and/or noise).
+    phasemethod -- defines the method that is used for the responsivity calculation. Options:
+        f0 (default) - uses the f0 vs T from the S21-measurement. 
+        crossnoise - uses noise PSDs: dTheta/dNqp = crossNL/sqrt(ampNL). (future)
+    ampmethod -- defines which method is used for the amplitude responsivity. Options:
+        Qi (default) - uses the 1/Qi fit in the S21-analysis, direct from S21 csv
+        pulse - computes dA/dTheta from pulses (minimal temp, wavelength) and 
+                multiplies phase responsivity with it.
+        noise - computes dA/dTheta by dividing the amp and phase PSDs 
+                from the noise measurement and multiplies the phase
+                responsivity with it (future).
+        crossnoise - computes dA/dNqp by dividing the crossPSD with sqrt(phasePSD)
+                    (future)'''
+    
+    S21data = io.get_S21data(Chipnum,KIDnum,Pread)
+    Temp = S21data[:,1]
+    if phasemethod == 'f0':
+        phaseResp = S21data[:,10]
+    
+    if ampmethod == 'Qi':
+        ampResp = S21data[:,18]
+    elif ampmethod == 'pulse':
+        pulsePreadar = io.get_pulsePread(Chipnum,KIDnum)
+        pulsePreadselect = pulsePreadar[np.abs(pulsePreadar-Pread).argmin()]
+        pulseTemp = io.get_pulseTemp(Chipnum,KIDnum,pulsePreadselect).min()
+        pulsewvl = io.get_pulsewvl(Chipnum,KIDnum,pulsePreadselect,pulseTemp).min()
+        phasepulse,amppulse = io.get_pulsedata(
+            Chipnum,KIDnum,pulsePreadselect,pulseTemp,pulsewvl)
+
+        phtau = tau_pulse(phasepulse)
+        amptau = tau_pulse(amppulse)
+        assert np.abs(1-phtau/amptau) < .1, 'Amp and Phase lifetimes differ by more than 10%' 
+        dAdTheta = -1*(amppulse/phasepulse)[600:int(600+2*phtau)].mean()
+        ampResp = phaseResp*dAdTheta
+        
+    if var == 'cross':
+        Respspl = interpolate.splrep(
+            Temp,np.sqrt(ampResp*phaseResp),s=0)
+    elif var == 'amp':
+        Respspl = interpolate.splrep(
+            Temp,ampResp,s=0)
+    elif var == 'phase':
+        Respspl = interpolate.splrep(
+            Temp,phaseResp,s=0)
+    return Respspl
+    
+def NLcomp(Chipnum,KIDnum,Pread,SC=None,method='',var='cross'):
+    '''Returns a spline representation of a Noise Level (non-dB) vs Temperature (K), 
+    with which the measured noise level can be compensated. For example,
+    the method \'Resp\' gives the responsivity squared. If the measured 
+    noise level is divided by the responsivity squared, one is left with 
+    the quasiparticle fluctuation level.
+    Arguments:
+    Chipnum, KIDnum, Pread -- define which data is to be used (S21data and/or pulse data)
+    SC -- a SuperConductor object (see SC module), which defines superconductor properties
+    method -- defines which level is to be returned. See if statements in the function for the options.
+            (future: multiply every individual method stated in the method string)
+    var -- gives the type of PSD to be compensated - cross, amp or phase - and is used 
+            if \'Reps\' is in the method '''
+    
+    S21data = io.get_S21data(Chipnum,KIDnum,Pread)
+    if SC is None and method != '':
+        SC = Al(Tc=S21data[0,21],V=S21data[0,14],d=S21data[0,25])
+    
+    if method != '':
+        if 'ak' in method:
+            akin = ak(S21data)
+            
+        if method == 'QakV':
+            lvlcompspl = interpolate.splrep(
+                S21data[:,1],
+                (S21data[:,2]*akin)**2/SC.V**2,s=0)
+            
+        elif method == 'QaksqrtV':
+            lvlcompspl = interpolate.splrep(
+                S21data[:,1],
+                (S21data[:,2]*akin)**2/(SC.V),s=0)
+            
+        elif method == 'QaksqrtVtesc':
+            lvlcompspl = interpolate.splrep(
+                S21data[:,1],
+                (S21data[:,2]*akin)**2/\
+                (SC.V*(1+SC.tesc/SC.tpb)),s=0)
+            
+        elif method == 'QaksqrtVtescTc':
+            lvlcompspl = interpolate.splrep(
+                S21data[:,1],
+                (S21data[:,2]*akin)**2/\
+                (SC.V*(1+SC.tesc/SC.tpb)\
+                 *(const.Boltzmann/const.e*1e6*S21data[0,21])**3/\
+                 (SC.D0/const.e*1e6)**2),s=0)
+            
+        elif method == 'Resp':            
+            lvlcompspl = interpolate.splrep(
+                S21data[:,1],interpolate.splev(
+                    S21data[:,1],Respspl(Chipnum,KIDnum,Pread,var=var))**2)
+            
+        elif method == 'RespPulse':
+            lvlcompspl = interpolate.splrep(
+                S21data[:,1],interpolate.splev(
+                    S21data[:,1],Respspl(
+                        Chipnum,KIDnum,Pread,ampmethod='pulse',var=var))**2)
+
+        elif method == 'RespPint':
+            Pint = 10**(-Pread/10)*S21data[:,2]**2/(S21data[:,3]*np.pi)
+            Pint /= Pint[0]
+            lvlcompspl = interpolate.splrep(
+                S21data[:,1],
+                interpolate.splev(S21data[:,1],
+                                  Resp2spl)/Pint**(1/2),s=0)
+            
+        elif method == 'RespV':            
+            lvlcompspl = interpolate.splrep(
+                S21data[:,1],
+                interpolate.splev(S21data[:,1],
+                                  Resp2spl)*SC.V,s=0)
+            
+        elif method == 'RespVtescTc':   
+            kbTc = const.Boltzmann/const.e*1e6*S21data[0,21]
+            lvlcompspl = interpolate.splrep(
+                S21data[:,1],
+                interpolate.splev(S21data[:,1],Resp2spl)\
+                *SC.V*(1+SC.tesc/SC.tpb)*(kbTc)**3/(kidcalc.D(
+                    const.Boltzmann/const.e*1e6*S21data[:,1],SC))**2,s=0)
+            
+        elif method == 'RespLowT':
+            lvlcompspl = interpolate.splrep(
+                S21data[:,1],np.ones(len(S21data[:,1]))*\
+            interpolate.splev(S21data[0,1],Resp2spl))
+        
+        elif method == 'Resptres':
+            lvlcompspl = interpolate.splrep(
+                S21data[:,1],interpolate.splev(
+                    S21data[:,1],Respspl(Chipnum,KIDnum,Pread,var=var))**2\
+            *(1+(freq*2*S21data[:,2]/S21data[:,5])**2))
+        else:
+            raise ValueError('{} is an invalid compensation method'.format(
+                method))
+        Pint = 10*np.log10(10**(-1*Pread/10)*S21data[0,2]**2/S21data[0,3]/np.pi)
+    else:
+        lvlcompspl = interpolate.splrep(
+                np.linspace(S21data[0,1],S21data[-1,1],10),np.ones(10))
+    return lvlcompspl
+    
 def tau_pulse(pulse,tfit=(10,1e3),reterr=False,plot=False):
     '''Calculates lifetime from a exponential fit to a pulse.
     Arguments:
@@ -193,7 +340,7 @@ def tau_pulse(pulse,tfit=(10,1e3),reterr=False,plot=False):
     else: 
         return fit[0][0]
     
-def tesc(Chipnum,KIDnum,SC=Al(),usePread='max',
+def tesc(Chipnum,KIDnum,SC=None,usePread='max',
               minTemp=200,maxTemp=400,taunonkaplan=2e2,taures=1e1,relerrthrs=.2,
               pltfit=False,pltkaplan=False,reterr=False,defaulttesc=0):
     '''Calculates the phonon escape time from the GR noise lifetimes and Kaplan.
@@ -205,6 +352,9 @@ def tesc(Chipnum,KIDnum,SC=Al(),usePread='max',
     
     TDparam = io.get_grTDparam(Chipnum)
     Pread = _selectPread(usePread,io.get_grPread(TDparam,KIDnum))[0]
+    if SC is None:
+        S21data = io.get_S21data(Chipnum,KIDnum)
+        SC = Al(Tc=S21data[0,21],V=S21data[0,14],d=S21data[0,25])
     
     Temp = io.get_grTemp(TDparam,KIDnum,Pread)
     Temp = Temp[np.logical_and(Temp<maxTemp,Temp>minTemp)]
@@ -260,7 +410,6 @@ def tesc(Chipnum,KIDnum,SC=Al(),usePread='max',
         return tesc1,tescerr
     else:
         return tesc1
-
 def get_tescdict(Chipnum,Pread='max'):
     '''Returns a dictionary with the escape times of all KIDs in a chip.'''
     tescdict = {}
