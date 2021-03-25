@@ -45,7 +45,7 @@ def _selectPread(pltPread,Preadar):
     return Pread
     
 
-def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',clbar=True,
+def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',SCkwargs={},clbar=True,
               del1fNoise=False,delampNoise=False,del1fnNoise=False,suboffres=False,
               plttres=False,
               Tminmax=(0,500),ax12=None,
@@ -71,6 +71,11 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',clbar=Tru
     else:
         raise ValueError('Invalid Spectrum Selection')
         
+    if lvlcomp != '':
+        SC_inst = SC.init_SC(Chipnum,KIDnum,**SCkwargs)
+    else:
+        SC_inst = SC.Al()
+        
     for KIDnum in KIDlist:
         Preadar = _selectPread(pltPread,io.get_grPread(TDparam,KIDnum))
         if ax12 is None:
@@ -82,8 +87,7 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',clbar=Tru
             axs = ax12
         
         for ax1,Pread in zip(range(len(Preadar)),Preadar):
-            lvlcompspl = calc.NLcomp(Chipnum,KIDnum,Pread,SC=SC_inst,method=lvlcomp,var=spec)
-            
+                        
             axs[ax1,0].set_ylabel('PSD (dBc/Hz)')
             Temp = io.get_grTemp(TDparam,KIDnum,Pread)
             if suboffres:
@@ -96,9 +100,12 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',clbar=Tru
                 clb = plt.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap),
                                    ax=axs[ax1,-1])
                 clb.ax.set_title('T (mK)')
+            if plttres:
+                S21data = io.get_S21data(Chipnum,KIDnum,Pread)
                 
             for i in range(len(Temp)):
-                for (ax2,spec) in zip(range(len(specs)),specs):                 
+                for (ax2,spec) in zip(range(len(specs)),specs):   
+                    lvlcompspl = calc.NLcomp(Chipnum,KIDnum,Pread,SC=SC_inst,method=lvlcomp,var=spec)
                     freq,SPR = io.get_grdata(TDparam,KIDnum,Pread,Temp[i],spec=spec)
                     if suboffres:
                         orfreq,orSPR = io.get_grdata(TDparamoffres,KIDnum,Pread,Temp[i],spec=spec)
@@ -120,10 +127,8 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',clbar=Tru
                     axs[ax1,ax2].set_xscale('log')
                     axs[ax1,ax2].set_title(spec+ ', -{} dBm'.format(Pread))
                     axs[-1,ax2].set_xlabel('Freq. (Hz)')
-                    axs[-1,ax2].set_xlim(*xlim)
                     
                     if plttres:
-                        S21data = io.get_S21data(Chipnum,KIDnum,Pread)
                         Tind = np.abs(S21data[:,1]-Temp[i]*1e-3).argmin()
                         axs[ax1,ax2].annotate('',(S21data[Tind,5]/(2*S21data[Tind,2]),
                                                   ylim[1]),
@@ -131,10 +136,9 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',clbar=Tru
                                                   ylim[1]+10),
                                              arrowprops=dict(arrowstyle='->',color=cmap(norm(Temp[i]))),
                                              annotation_clip=False)
-                        
-
-            axs[ax1,0].set_ylim(*ylim)
-            plt.tight_layout(rect=(0,0,1,1-.12/len(Preadar)))
+        axs[0,0].set_xlim(*xlim)
+        axs[0,0].set_ylim(*ylim)
+        plt.tight_layout(rect=(0,0,1,1-.12/len(Preadar)))
     if ax12 is None and len(KIDlist) == 1:
         return fig,axs
                     
@@ -356,6 +360,7 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                     warnings.warn('Could not make Thermal Noise Level, {},KID{},-{} dBm,{}'.format(
                     Chipnum,KIDnum,Pread,spec))
             if plttres:
+                S21data = io.get_S21data(Chipnum,KIDnum,Pread)
                 tresline, = axs[0].plot(S21data[:,1]*1e3,
                             S21data[:,2]/(np.pi*S21data[:,5])*1e6,color=clr,linestyle=':')
                 axs[0].legend((tresline,),('$\\tau_{res}$',))

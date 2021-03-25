@@ -97,6 +97,7 @@ def tau(freq, SPR, startf = None, stopf = None,decades=3,minf=1e2,
     SPR -- power spectral denisty values (in dB)
     startf -- start frequency for the fit, default None: 3 decades lower than stopf
     stopf -- stop frequency for the fit, default the lowest value in the interval 3e2 to 3e4 Hz
+    decades -- fitrange length in decades, used to determine startf when startf is None.
     plot -- boolean to show the plot
     retfnl -- boolean to return the noise level as well.
     
@@ -210,6 +211,8 @@ def Respspl(Chipnum,KIDnum,Pread,phasemethod='f0',ampmethod='Qi',var='cross'):
     elif var == 'phase':
         Respspl = interpolate.splrep(
             Temp,phaseResp,s=0)
+    else:
+        raise ValueError(f'\'{var}\' is not a valid variable')
     return Respspl
     
 def NLcomp(Chipnum,KIDnum,Pread,SC=None,method='',var='cross'):
@@ -226,11 +229,13 @@ def NLcomp(Chipnum,KIDnum,Pread,SC=None,method='',var='cross'):
     var -- gives the type of PSD to be compensated - cross, amp or phase - and is used 
             if \'Reps\' is in the method '''
     
-    S21data = io.get_S21data(Chipnum,KIDnum,Pread)
+    
     if SC is None and method != '':
+        S21data = io.get_S21data(Chipnum,KIDnum,Pread)
         SC = Al(Tc=S21data[0,21],V=S21data[0,14],d=S21data[0,25])
     
     if method != '':
+        S21data = io.get_S21data(Chipnum,KIDnum,Pread)
         if 'ak' in method:
             akin = ak(S21data)
             
@@ -307,7 +312,7 @@ def NLcomp(Chipnum,KIDnum,Pread,SC=None,method='',var='cross'):
         Pint = 10*np.log10(10**(-1*Pread/10)*S21data[0,2]**2/S21data[0,3]/np.pi)
     else:
         lvlcompspl = interpolate.splrep(
-                np.linspace(S21data[0,1],S21data[-1,1],10),np.ones(10))
+                np.linspace(.01,10,10),np.ones(10))
     return lvlcompspl
     
 def tau_pulse(pulse,tfit=(10,1e3),reterr=False,plot=False):
@@ -463,4 +468,3 @@ def NqpfromQi(S21data,uselowtempapprox=True,SC=Al()):
             D_ = D(kbTeff,SC)
             Nqp[i] = S21data[0,14]*nqp(kbTeff,D_,SC)
         return kbT/(const.Boltzmann/const.e*1e6),Nqp
-                   

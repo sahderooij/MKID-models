@@ -51,19 +51,20 @@ def D(kbT, SC):
         Dspl = interpolate.splrep(Ddata[0, :], Ddata[1, :], s=0)
         return np.clip(interpolate.splev(kbT, Dspl),0,None)
     else:
-        warnings.warn('D takes long.. \n N0={}\n kbTD={}\n Tc={}'.format(
-            SC.N0,SC.kbTD,SC.kbTc/(const.Boltzmann/const.e*1e6)))
-        _Vsc = Vsc(kbTc,N0,kbTD)
+        warnings.warn(
+            'D calculation takes long.. \n Superconductor={}\n N0={}\n kbTD={}\n Tc={}'.format(
+                SC.name,SC.N0,SC.kbTD,SC.kbTc/(const.Boltzmann/const.e*1e6)))
+        
         def integrandD(E, D, kbT, SC):
             return SC.N0 * SC.Vsc * (1 - 2 * f(E, kbT)) / np.sqrt(E ** 2 - D ** 2)
 
         def dint(D, kbT, SC):
             return np.abs(
                 integrate.quad(integrandD, D, SC.kbTD,
-                               args=(D, kbT, SC.N0, SC.Vsc))[0] - 1
+                               args=(D, kbT, SC),points=(D,))[0] - 1
             )
 
-        res = minisc(dint, args=(kbT, SC))
+        res = minisc(dint, args=(kbT, SC),method='bounded',bounds=(0,SC.D0))
         if res.success:
             return np.clip(res.x,0,None)
 

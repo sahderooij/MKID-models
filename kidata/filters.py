@@ -65,21 +65,19 @@ def del_1fNoise(freq,SPR,plot=False):
         plt.show();plt.close()
     return freqn,SPRn
 
-def del_1fnNoise(freq,SPR,plot=False):
-    '''A 1/f^n spectrum is fitted and subtracted if n is higher than 0.35.'''
+def del_1fnNoise(freq,SPR,minn=.35,plot=False):
+    '''A 1/f^n spectrum is fitted and subtracted if n is higher than minn (default: 0.35).'''
     #Delete -140 datapoints
     freq = freq[SPR!=-140]
     SPR = SPR[SPR!=-140]
     #Make it non-dB
     SPRn = 10**(SPR/10)
-    try:
-        fit = curve_fit(lambda f,a,b: a*f**(-b),
-                        freq[~np.isnan(SPRn)][1:],SPRn[~np.isnan(SPRn)][1:],
-                        p0=(SPRn[~np.isnan(SPRn)][1:4].mean(),1))
-    except:
-        fit = np.array([[np.nan,np.nan]])
     
-    if fit[0][1] > .35:
+    fit = curve_fit(lambda f,a,b: a*f**(-b),
+                    freq[~np.isnan(SPRn)][1:],SPRn[~np.isnan(SPRn)][1:],
+                    p0=(SPRn[~np.isnan(SPRn)][1:4].mean(),1))
+    
+    if fit[0][1] > minn:
         SPRn -= fit[0][0]*freq**(-fit[0][1])
     
     #filter positive 
@@ -93,7 +91,7 @@ def del_1fnNoise(freq,SPR,plot=False):
         plt.plot(freq,SPR,label='Input')
         plt.plot(freqn,SPRn,label='Filtered')
         plt.xscale('log')
-        plt.plot(freq[freq<1e2],10*np.log10(fit[0][0]*freq[freq<1e2]**(-fit[0][1])),label='fit')
+        plt.plot(freq,10*np.log10(fit[0][0]*freq**(-fit[0][1])),label='fit')
         plt.legend()
         plt.show();plt.close()
     return freqn,SPRn
