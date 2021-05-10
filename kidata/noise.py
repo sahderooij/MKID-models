@@ -10,18 +10,19 @@ import warnings
 
 from kidata import io,plot,calc,filters
 
-def to_ampphase(noisedata):
+def to_ampphase(data):
     '''Converts the I and Q variables from the raw .dat file to (normalized) amplitude and phase.
     Takes: 
-    data from io.get_noisebin
+    data loaded by np.fromfile(path,dtype='>f8').reshape(-1,2)
     
     Returns:
     Amplitude, Phase: numpy arrays'''
-    Amp = np.sqrt(noisedata[:,0]**2+noisedata[:,1]**2)
+    
+    Amp = np.sqrt(data[:,0]**2+data[:,1]**2)
     Amp /= Amp.mean()
     Phase = (np.pi - \
              (np.arctan2(
-        noisedata[:,1],noisedata[:,0]) % (2*np.pi)))
+        data[:,1],data[:,0]) % (2*np.pi)))
     return Amp,Phase
 
 def subtr_offset(data,plot=False):
@@ -251,7 +252,7 @@ def do_TDanalysis(Chipnum,
                     
                 PSDs = np.zeros(3,dtype=object) #dims: [var (amp,phase,cross)]
                 for varind in range(3):
-                    if len(freq) == 1:
+                    if len(freq) == 1:#check if multiple spectra need to be stichted.
                         PSDs[varind] = logsmooth(np.real(allPSDs[0,varind][0][:,0]),
                                                  allPSDs[0,varind][0][:,1],ppd)
                     elif len(freqs) == 2:

@@ -107,18 +107,16 @@ def tau(freq, SPR, startf = None, stopf = None,decades=3,minf=1e2,
     optionally: noise level (non-dB) and  error in noise level.'''
     
     #Filter nan-values
-    freq = freq[SPR!=-140]
-    SPR = SPR[SPR!=-140]
     freq = freq[~np.isnan(SPR)]
     SPR = SPR[~np.isnan(SPR)]
     freq = freq[SPR!=-np.inf]
     SPR = SPR[SPR!=-np.inf]
     if stopf is None:
-        bdwth = np.logical_and(freq>3e2,freq<3e4)
         try:
+            bdwth = np.logical_and(freq>10**(np.log10(minf)+decades),freq<2*freq.max()/10)
             stopf = freq[bdwth][np.real(SPR[bdwth]).argmin()]
         except ValueError:
-            stopf = 25e4
+            stopf = 10**(np.log10(minf)+decades)
     if startf is None:
         startf = max(10**(np.log10(stopf)-decades),minf)
     
@@ -315,10 +313,12 @@ def NLcomp(Chipnum,KIDnum,Pread,SC=None,method='',var='cross'):
                 np.linspace(.01,10,10),np.ones(10))
     return lvlcompspl
     
-def tau_pulse(pulse,tfit=(10,1e3),reterr=False,plot=False):
+def tau_pulse(pulse,pulsestart=500,sfreq=1e6,tfit=(10,1e3),tauguess=500,reterr=False,plot=False):
     '''Calculates lifetime from a exponential fit to a pulse.
     Arguments:
     pulse -- pulse data at 1 MHz, with begin of the pulse at 500 (µs)
+    pulsestart -- index where the rise time of the pulse is halfway
+    sfreq -- sample frequency of the pulse data
     tfit -- tuple to specify the fitting window, default is (10,1e3)
     reterr -- boolean to return error
     plot -- boolean to plot the fit
@@ -326,13 +326,16 @@ def tau_pulse(pulse,tfit=(10,1e3),reterr=False,plot=False):
     Returns:
     tau -- in µs
     optionally the fitting error'''
-    t = (np.arange(len(pulse)) - 500) 
+    t = (np.arange(len(pulse)) - pulsestart) 
     fitmask = np.logical_and(t > tfit[0], t < tfit[1])
     t2 = t[fitmask]
     peak2 = pulse[fitmask]
-    fit = curve_fit(
-        lambda x, a, b: b * np.exp(-x / a), t2, peak2, p0=(0.5e3, peak2[0])
-    )
+    try:
+        fit = curve_fit(
+            lambda x, a, b: b * np.exp(-x / a), t2, peak2, p0=(tauguess, peak2[0])
+        )
+    except RuntimeError:
+        fit = [[np.nan,np.nan],np.array([[np.nan,np.nan],[np.nan,np.nan]])]
     
     if plot:
         plt.figure()
@@ -341,9 +344,56 @@ def tau_pulse(pulse,tfit=(10,1e3),reterr=False,plot=False):
         plt.yscale('log')
         plt.show();plt.close()
     if reterr:
-        return fit[0][0],np.sqrt(fit[1][0,0])
+        return fit[0][0]*1e6/sfreq,np.sqrt(fit[1][0,0])*1e6/sfreq
     else: 
-        return fit[0][0]
+        return fit[0][0]*1e6/sfreq
+    
+def fit_nonexppulse(pulse,pulsestart=500,sfreq=1e6,tsstfit=(200,1e3),tssguess=500,
+                    tfit=(0,3e3),reterr=False,plot=False):
+    '''Fits an equation of the form: 
+        x(t) = xi*(1-r)/(exp(t/tss)-r). 
+    This is a solution to 
+        dx/dt = -R x^2  -x/tss, 
+    with r/(1-r)=R*xi*tss (Wang2014). 
+    First, tss is estimated from the second part of the pulse decay (tsstfit), 
+    after which r is extracted with the full fit window (tfit). Otherwise the fit does not
+    converge. 
+    
+    Returns:
+    tss -- in µs
+    R -- in µs^-1, 
+    optionally with error'''
+    
+    tss,tsserr = np.array(tau_pulse(pulse,pulsestart,sfreq,tsstfit,tssguess,reterr=True))*1e-6*sfreq
+    
+    t = (np.arange(len(pulse)) - pulsestart) 
+    fitmask = np.logical_and(t > tfit[0], t < tfit[1])
+    t2 = t[fitmask]
+    peak2 = pulse[fitmask]
+    def fitfun(t, r, xi):
+        return xi*(1-r)/(np.exp(t / tss)-r)
+    fit = curve_fit(fitfun, 
+        t2, peak2, p0=(.5, peak2[0]), bounds=(0,[1,pulse.max()])
+    )
+    R = fit[0][0]/(1-fit[0][0])/(fit[0][1]*tss)
+    
+    if plot:
+        plt.figure()
+        plt.plot(t, pulse)
+        plt.plot(t2, fitfun(t2,fit[0][0],fit[0][1]))
+        plt.yscale('log')
+        plt.show();plt.close()
+    if reterr:
+        return tss*1e6/sfreq,tsserr*1e6/sfreq,R*1e6/sfreq,np.sqrt(
+            (np.array(
+                [1/(1-fit[0][0])/tss/fit[0][1]*(1+fit[0][0]/(1-fit[0][0])),
+                fit[0][0]/(1-fit[0][0])/tss**2/fit[0][1],
+                fit[0][0]/(1-fit[0][0])/tss/fit[0][1]**2]
+            )**2).dot([fit[1][0,0],tsserr**2,fit[1][1,1]]).sum())
+    else: 
+        return tss*1e6/sfreq,R*1e6/sfreq
+    
+    
     
 def tesc(Chipnum,KIDnum,SC=None,usePread='max',
               minTemp=200,maxTemp=400,taunonkaplan=2e2,taures=1e1,relerrthrs=.2,

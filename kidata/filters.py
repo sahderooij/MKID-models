@@ -13,21 +13,12 @@ def del_ampNoise(freq,SPR,plot=False):
     SPR = SPR[SPR!=-140]
     #Make it non-dB
     SPRn = 10**(SPR/10)
-#     #Substract amplifier noise
-#     startr1 = 7e3
-#     stopr1 = 1e4
-#     startr2 = 3e2
-#     stopr2 = 1e4
-#     if SPRn[np.logical_and(freq>startr1,freq<stopr1)].size > 0 and \
-#         SPRn[np.logical_and(freq>startr2,freq<stopr2)].size > 0:
-#         #sometimes amplifier noise is higher.. so check:
-#         if SPRn[np.logical_and(freq>startr1,freq<stopr1)].mean() < \
-#             SPRn[np.logical_and(freq>startr2,freq<stopr2)].mean():
-#             SPRn -= SPRn[np.logical_and(freq>startr1,freq<stopr1)].max()
-#         else:
-#             SPRn -= SPRn[np.logical_and(freq>startr2,freq<stopr2)].min()
-    if len(SPRn) > 5:
-        SPRn -= SPRn[-5]
+    #Substract amplifier noise
+    startr1 = freq.max()/2
+    stopr1 = freq.max()
+    if SPRn[np.logical_and(freq>startr1,freq<stopr1)].size > 0:
+        SPRn -= SPRn[np.logical_and(freq>startr1,freq<stopr1)].max()
+            
     #filter positive 
     freqn = freq[SPRn>0]
     SPRn = SPRn[SPRn>0]

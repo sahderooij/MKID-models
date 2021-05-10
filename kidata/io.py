@@ -120,27 +120,27 @@ def get_S21data(Chipnum, KIDnum, Pread=None):
 
 #Pulse
 def get_pulseKIDs(Chipnum):
-    '''Returns which KIDs are measured at Pulse-measurement'''
+    '''Returns which KIDs are measured at pulse measurements'''
     return np.unique([int(i.split('\\')[-1].split('_')[0][3:]) 
                      for i in glob.glob(get_datafld() + f'{Chipnum}\\*mK\\*.mat')])
 
 def get_pulsePread(Chipnum,KIDnum):
-    '''Returns which read powers are measured at Pulse-measurement'''
+    '''Returns which read powers are measured at pulse measurements'''
     return np.unique([int(i.split('\\')[-1].split('_')[1][:-3])
                       for i in glob.glob(
                           get_datafld() + f'{Chipnum}\\*mK\\KID{KIDnum}*.mat')])
 
 def get_pulseTemp(Chipnum,KIDnum,Pread):
-    '''Returns which temperatures are measured at Pulse-measurement'''
+    '''Returns which temperatures are measured at pulse measurements'''
     return np.unique([int(i.split('\\')[-2][:-2])
                       for i in glob.glob(
                           get_datafld() + f'{Chipnum}\\*mK\\KID{KIDnum}_{Pread}dBm*.mat')])
 
 def get_pulsewvl(Chipnum,KIDnum,Pread,Temp):
-    '''Returns which wavelengths are measured at Pulse-measurement'''
+    '''Returns which wavelengths are measured at pulse measurements'''
     return np.unique([int(i.split('\\')[-1].split('_')[2])
                       for i in glob.glob(
-                          get_datafld() + f'{Chipnum}\\{Temp}mK\\KID{KIDnum}_{Pread}dBm*.mat')])    
+                          get_datafld() + f'{Chipnum}\\{Temp}mK\\KID{KIDnum}_{Pread}dBm*.mat')])
     
 def get_pulsedata(Chipnum,KIDnum,Pread,Tbath,wvlngth,points = 3000):
     '''Returns the phase and amplitude average pulse from the .mat-file. 

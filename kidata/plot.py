@@ -7,7 +7,7 @@ from scipy import interpolate
 import scipy.constants as const
 import scipy.io
 
-import SC
+import SC as SuperCond
 from kidata import io
 from kidata import calc
 from kidata import filters
@@ -45,7 +45,7 @@ def _selectPread(pltPread,Preadar):
     return Pread
     
 
-def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',SCkwargs={},clbar=True,
+def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',SC=None,SCkwargs={},clbar=True,
               del1fNoise=False,delampNoise=False,del1fnNoise=False,suboffres=False,
               plttres=False,
               Tminmax=(0,500),ax12=None,
@@ -72,9 +72,12 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',SCkwargs=
         raise ValueError('Invalid Spectrum Selection')
         
     if lvlcomp != '':
-        SC_inst = SC.init_SC(Chipnum,KIDnum,**SCkwargs)
+        if SC is None:
+            SC_inst = SuperCond.init_SC(Chipnum,KIDnum,**SCkwargs)
+        else:
+            SC_inst = SC
     else:
-        SC_inst = SC.Al()
+        SC_inst = SuperCond.Al()
         
     for KIDnum in KIDlist:
         Preadar = _selectPread(pltPread,io.get_grPread(TDparam,KIDnum))
@@ -144,11 +147,11 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',SCkwargs=
                     
                     
 def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startstopf=(None,None),
-           lvlcomp='',
+           lvlcomp='',pltTTc=False,
                 delampNoise=False,del1fNoise=False,del1fnNoise=False,suboffres=False,relerrthrs=.2,
-                pltKIDsep=True,pltthlvl=False,pltkaplan=False,pltthmfnl=False,plttres=False,
+                pltKIDsep=True,pltthlvl=False,pltkaplan=False,pltthmfnl=False,plttres=False,plttscat=False,
                 fig=None,ax12=None,color='Pread',pltclrbar=True,fmt='-o',label=None,
-               SCkwargs={},showfit=False,savefig=False):
+               SC=None,SCkwargs={},showfit=False,savefig=False):
     '''Plots the results from a Lorentzian fit to the PSDs of multiple KIDs, read powers and temperatures. 
     Two axes: 0: lifetimes 1: noise levels, both with temperature on the x-axis. The color can be specified and
     is Pread by default. 
@@ -248,10 +251,13 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
             elif color == 'Pint':
                 cmap,norm = _get_cmap(Pintar=np.array(Pintdict[KIDnum]))
             
-        if lvlcomp != '' or pltkaplan or pltthmfnl:
-            SC_inst = SC.init_SC(Chipnum,KIDnum,**SCkwargs)
+        if lvlcomp != '' or pltkaplan or pltthmfnl or pltthlvl or pltTTc:
+            if SC is None:
+                SC_inst = SuperCond.init_SC(Chipnum,KIDnum,**SCkwargs)
+            else:
+                SC_inst = SC
         else:
-            SC_inst = SC.Al()
+            SC_inst = SuperCond.Al()
     
         for Pread in Preadar:
             Temp = np.trim_zeros(io.get_grTemp(TDparam,KIDnum,Pread))
@@ -307,6 +313,9 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                 clr = cmap(norm(KIDnum))
             else:
                 clr = color
+                
+            if pltTTc:
+                Temp = Temp/(SC_inst.kbTc/(const.Boltzmann/const.e*1e6)*1e3)
             
             axs[0].errorbar(Temp[mask],taut[mask],
                                      yerr = tauterr[mask],fmt = fmt,capsize = 3.,
@@ -321,11 +330,15 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                 else:
                     Tstartstop = (Temp[mask].min(),Temp[mask].max())
                 Ttemp = np.linspace(*Tstartstop,100)
+                if pltTTc:
+                    Ttemp = Ttemp*(SC_inst.kbTc/(const.Boltzmann/const.e*1e6)*1e3)
                 explvl = interpolate.splev(
                     Ttemp*1e-3,calc.Respspl(Chipnum,KIDnum,Pread,var=spec))**2
                 explvl *= (4*SC_inst.t0*1e-6*SC_inst.V*SC_inst.N0*(SC_inst.kbTc)**3/
                            (2*(SC_inst.D0)**2)*(1+SC_inst.tesc/SC_inst.tpb)/2)
                 explvl /= interpolate.splev(Ttemp*1e-3,lvlcompspl)
+                if pltTTc:
+                    Ttemp = Ttemp/(SC_inst.kbTc/(const.Boltzmann/const.e*1e6)*1e3)
                 thlvlplot, = axs[1].plot(Ttemp,10*np.log10(explvl),
                                          color=clr,linestyle='--',linewidth=2.)
                 axs[1].legend((thlvlplot,),(r'Expected noise level',))
@@ -335,13 +348,44 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                     Tstartstop = Tminmax
                 else:
                     Tstartstop = (Temp[mask].min(),Temp[mask].max())
-                T = np.linspace(*Tstartstop,100)*1e-3
+                T = np.linspace(*Tstartstop,100)
+                
+                if pltTTc:
+                    T = T*(SC_inst.kbTc/(const.Boltzmann/const.e*1e6))
+                else:
+                    T = T*1e-3
                 taukaplan = kidcalc.tau_kaplan(T,SC_inst)
-                kaplanfit, = axs[0].plot(T*1e3,taukaplan,color=clr,linestyle='--',linewidth=2.)
-                axs[0].legend((kaplanfit,),('Kaplan',))
+                if pltTTc:
+                    T = T/(SC_inst.kbTc/(const.Boltzmann/const.e*1e6))
+                else:
+                    T = T*1e3
+                axs[0].plot(T,taukaplan,color=clr,linestyle='--',linewidth=2.,
+                           label='Kaplan, $\\tau_{qp}$')
+            
+            if plttscat:
+                if Tminmax is not None:
+                    Tstartstop = Tminmax
+                else:
+                    Tstartstop = (Temp[mask].min(),Temp[mask].max())
+                T = np.linspace(*Tstartstop,100)
+                
+                if pltTTc:
+                    T = T*(SC_inst.kbTc/(const.Boltzmann/const.e*1e6))
+                else:
+                    T = T*1e-3
+                tscat = SC_inst.t0/(2.277*(SC_inst.kbTc/(2*SC_inst.D0))**.5*\
+                        (T/(SC_inst.kbTc/(const.Boltzmann/const.e*1e6)))**(7/2))
+                if pltTTc:
+                    T = T/(SC_inst.kbTc/(const.Boltzmann/const.e*1e6))
+                else:
+                    T = T*1e3
+                axs[0].plot(T,tscat,color=clr,linestyle='-.',linewidth=2.,
+                                        label='Kaplan, $\\tau_s$')                
                 
             if pltthmfnl:
                 try:
+                    if pltTTc:
+                        Temp = Temp*(SC_inst.kbTc/(const.Boltzmann/const.e*1e6)*1e3)
                     tauspl = interpolate.splrep(Temp[mask],taut[mask],s=0)
                     T = np.linspace(Temp[mask].min(),Temp[mask].max(),100)
                     Nqp = np.zeros(len(T))
@@ -353,6 +397,8 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                         Nqp*interpolate.splev(
                         T*1e-3,calc.Respspl(Chipnum,KIDnum,Pread,var=spec))**2
                     thmfnl /= interpolate.splev(T*1e-3,lvlcompspl)
+                    if pltTTc:
+                        T = T/(SC_inst.kbTc/(const.Boltzmann/const.e*1e6)*1e3)
                     thmfnlplot, = axs[1].plot(T,10*np.log10(thmfnl),color=clr,
                                               linestyle='--',linewidth=3.)
                     axs[1].legend((thmfnlplot,),('Thermal Noise Level \n with measured $\\tau_{qp}^*$',))
@@ -361,14 +407,17 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                     Chipnum,KIDnum,Pread,spec))
             if plttres:
                 S21data = io.get_S21data(Chipnum,KIDnum,Pread)
-                tresline, = axs[0].plot(S21data[:,1]*1e3,
+                tresline, = axs[0].plot(S21data[:,1]/S21data[0,21] if pltTTc else S21data[:,1]*1e3,
                             S21data[:,2]/(np.pi*S21data[:,5])*1e6,color=clr,linestyle=':')
                 axs[0].legend((tresline,),('$\\tau_{res}$',))
                 
                     
         axs[0].set_yscale('log')
         for i in range(2):
-            axs[i].set_xlabel('Temperature (mK)')
+            if pltTTc:
+                axs[i].set_xlabel('$T/T_c$')
+            else:
+                axs[i].set_xlabel('Temperature (mK)')
         axs[0].set_ylabel(r'$\tau_{qp}^*$ (µs)')
         
         if lvlcomp == 'Resp':
@@ -393,7 +442,7 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
 def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         startstopf=(None,None),
         delampNoise=False,del1fNoise=False,del1fnNoise=False,Tmax=500,relerrthrs=.3,
-        pltThrm=True,pltNqpQi=False,splitT=0,pltNqptau=False,SCkwargs={},nqpaxis=True,
+        pltThrm=True,pltNqpQi=False,splitT=0,pltNqptau=False,SC=None,SCkwargs={},nqpaxis=True,
         fig=None,ax=None,label=None,clr=None):
     '''Plots the number of quasiparticle calculated from the noise levels and lifetimes from PSDs.
     options similar to options in ltnlvl.
@@ -416,7 +465,10 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap),
                            ax=ax)
         clb.ax.set_title(r'$P_{read}$ (dBm)')
-    SC_inst = SC.init_SC(Chipnum,KIDnum,set_tesc=pltNqptau,**SCkwargs)
+    if SC is None:
+        SC_inst = SuperCond.init_SC(Chipnum,KIDnum,set_tesc=pltNqptau,**SCkwargs)
+    else:
+        SC_inst = SC
     for Pread in Preadar:
         S21data = io.get_S21data(Chipnum,KIDnum,Pread)
         
@@ -655,6 +707,24 @@ def PowersvsT(Chipnum,KIDnum,density=False,phnum=False,
     axs[0].set_yscale('log')
     axs[1].set_yscale('log')
     return fig,axs
+
+def tres(Chipnum,KIDnum,Pread=None,ax=None,label=None):
+    '''Plots the resonator ring-time as a function of temperature.'''
+    S21data = io.get_S21data(Chipnum,KIDnum,Pread)
+
+    if ax is None:
+        fig,ax = plt.subplots()
+        ax.set_title(f'{Chipnum}, KID{KIDnum}, {S21data[0,7]} dBm')
+    
+    T = S21data[:,1]*1e3
+    w = 2*np.pi*S21data[:,5]*1e-6
+    Q = S21data[:,2]
+    tres = 2*Q/w
+    
+    ax.plot(T,tres,label=label)
+    ax.set_xlabel('Temperature (mK)')
+    ax.set_ylabel(r'$\tau_{res}$ (µs)')
+    ax.set_yscale('log')
     
     
 def Nphres(Chipnum,KIDnum,Pread=None,ax=None,label=None):

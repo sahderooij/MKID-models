@@ -83,22 +83,29 @@ class Al(Superconductor):
         super().__init__('Al',Tc,433,1.72e4,rhon,11.6e6,2.03e6,.44,.28e-3,V,d,tesc)
     
 class bTa(Superconductor):
-    def __init__(self,Tc=1.,rhon=239.,V=1e3,d=.05,tesc=.4):
+    def __init__(self,Tc=1.,rhon=239.,V=1e3,d=.05,tesc=.4e-3):
         '''The default values should be adjusted per device, 
         as they vary from device to device. 
         The default escape time is calculated with Kaplan1979 for Ta on Sapphire.
         The hardcoded arguments for the
         __init__() method, are standard constants for Ta'''
-        super().__init__('bTa',Tc,246,3.07e4,rhon,np.nan,np.nan,1.78e-3,.0227e-3,V,d,tesc)
+        super().__init__('bTa',Tc,266,3.07e4,rhon,np.nan,np.nan,1.78e-3,.0227e-3,V,d,tesc)
         
 class aTa(Superconductor):
-    def __init__(self,Tc=4.4,rhon=8.8,V=1e3,d=.05,tesc=.4):
+    def __init__(self,Tc=4.4,rhon=8.8,V=1e3,d=.05,tesc=.4e-3):
         '''The default values should be adjusted per device, 
         as they vary from device to device. 
         The default escape time is calculated with Kaplan1979 for Ta on Sapphire.
         The hardcoded arguments for the
         __init__() method, are standard constants for Ta'''
-        super().__init__('aTa',Tc,246,5.70e4,rhon,9.5e6,.24e6,1.78e-3,.0227e-3,V,d,tesc)
+        super().__init__('aTa',Tc,250,5.70e4,rhon,9.5e6,.24e6,1.78e-3,.0227e-3,V,d,tesc)
+        
+class TiN(Superconductor):
+    def __init__(self,Tc=2.7,rhon=253,V=1e3,d=.022,tesc=0):
+        '''The default values should be adjested per device and are now set 
+        as mentioned in Coumou2013 and Kardakova2015, film C.
+        The Debye temperature is for T = 300 K, https://doi.org/10.1016/S1006-7191(08)60082-4'''
+        super().__init__('TiN',Tc,579.2,6.17e4,rhon,0,0,23e-3*4.2,0,V,d,tesc)
 
 ###################################################################################
 def init_SC(Chipnum,KIDnum,SC_class=Al,set_tesc=True,**tesckwargs):

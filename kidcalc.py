@@ -15,7 +15,15 @@ def f(E, kbT):
     '''The Fermi-Dirac distribution.'''
     with np.errstate(over='raise',under='ignore'):
         try:
-            return 1 / (1 + np.exp(E/kbT))
+            return 1 / (np.exp(E/kbT) + 1)
+        except FloatingPointError: #use low temperature approx. if normal fails.
+            return np.exp(-E/kbT)
+        
+def n(E, kbT):
+    '''The Bose-Einstein distribution.'''
+    with np.errstate(over='raise',under='ignore'):
+        try:
+            return 1 / (np.exp(E/kbT) - 1)
         except FloatingPointError: #use low temperature approx. if normal fails.
             return np.exp(-E/kbT)
 
@@ -129,7 +137,7 @@ def hwres(s2, hw0, s20, ak, kbT , D, SC):
     b = beta(kbT,D,SC)
     return hw0 * (
         1 + ak * b / 4 / s20 * (s2 - s20)
-    )  # note that is a linearized approach
+    )  # note that is linearized
 
 def S21(Qi, Qc, hwread, dhw, hwres):
     '''Gives the complex transmittance of a capacatively coupled
@@ -177,6 +185,24 @@ def tau_kaplan(T,SC):
     nqp_ = nqp(const.Boltzmann/const.e*1e6*T, D_, SC)
     taukaplan = SC.t0*SC.N0*SC.kbTc**3/(4*nqp_*D_**2)*(1+SC.tesc/SC.tpb) 
     return taukaplan
+
+def tauqp_kaplan(kbT,SC):
+    '''Calculates the intrinsic quasiparticle lifetime w.r.t recombination at E=Delta
+    from Kaplan1976 and uses the intral form s.t. it holds for all temperatures.'''
+    D_ = D(kbT, SC)
+    def integrand(E,D,kbT):
+        return E**2*(E-D)/np.sqrt((E-D)**2-D**2)*(1+D**2/(D*(E-D)))*(n(E,kbT)+1)*f(E-D,kbT)
+    
+    return SC.t0*SC.kbTc**3*(1-f(D_,kbT))/integrate.quad(integrand,2*D_,np.inf,args=(D_,kbT))[0]
+
+def tauscat_kaplan(kbT,SC):
+    '''Calculates the intrinsic quasiparticle lifetime w.r.t scattering at E=Delta
+    from Kaplan1976 and uses the intral form s.t. it holds for all temperatures.'''
+    D_ = D(kbT, SC)
+    def integrand(E,D,kbT):
+        return E**2*(E+D)/np.sqrt((E+D)**2-D**2)*(1-D**2/(D*(E+D)))*n(E,kbT)*(1-f(E+D,kbT))
+    
+    return SC.t0*SC.kbTc**3*(1-f(D_,kbT))/integrate.quad(integrand,0,np.inf,args=(D_,kbT))[0]
 
 def kbTbeff(tqpstar,SC,plot=False):
     '''Calculates the effective temperature, from a certian 
