@@ -103,7 +103,8 @@ def rej_pulses(data,nrsgm=6,nrseg=32,sfreq=50e3,
         
     return np.array(np.array_split(data,nrseg)),reject
 
-def calc_avgPSD(dataarr,reject,dataarr1=None,reject1=None,sfreq=50e3):
+def calc_avgPSD(dataarr,reject,dataarr1=None,reject1=None,sfreq=50e3,
+               nperseg='seglen'):
     '''Calculates the average cross PSD of dataarr and dataarr1, 
     from the segments of which both reject and reject1 are False.
     Takes:
@@ -112,6 +113,10 @@ def calc_avgPSD(dataarr,reject,dataarr1=None,reject1=None,sfreq=50e3):
     dataarr1 -- see dataarr
     reject1 -- see reject
     sfreq -- sample frequency
+    nperseg -- number of data points of each sub-segment, 
+            passed to the scipy.signal.csd function. Default is 'seglen', which
+            sets it to the length of each segment, i.e. no subsegments. For other values,
+            use a string of the form: 1e-3s, which will set the number to match 1 ms of data.
     
     Returns:
     frequency -- nan if all parts are rejected
@@ -120,13 +125,20 @@ def calc_avgPSD(dataarr,reject,dataarr1=None,reject1=None,sfreq=50e3):
         dataarr1 = dataarr
         reject1 = reject
     rejects = np.logical_or(reject,reject1)
+    
+    if nperseg == 'seglen':
+        nperseg = len(dataarr[0])
+    elif 's' in nperseg:
+        nperseg = float(nperseg.replace('s',''))*sfreq
+    else:
+        raise ValueError(f'{nperseg} is not a valid input')
+    
     if rejects.sum() != rejects.size:
         # csd is used, which uses Welch's method. 
-        # However, we choose nfft and nperseg as the full length, 
+        # However, if we choose nperseg as the full length ('seglen'), 
         # so we're only calculating the periodogram with a Hamming window.
         f,psds = csd(dataarr[~rejects],dataarr1[~rejects],
-                     window='hamming',nperseg=len(dataarr[0]),
-                     nfft=len(dataarr[0]),
+                     window='hamming',nperseg=nperseg,
                      fs=sfreq,axis=1,scaling='density')
         return f,psds.mean(0)
     else:
@@ -175,7 +187,8 @@ def do_TDanalysis(Chipnum,
     nrseg -- number of segments for the pulse rejection.
     nrsgm -- number of standard deviations to reject a segment in pulse rejection (default 6).
     freqs -- list of data types to be used. Default is ['med','fast'], which is both 50 kHz and  
-             1 MHz data. These spectra will be stitched together at 20 kHz.
+             1 MHz data. These spectra will be stitched together at 20 kHz. The fast data is
+             processed with nperseg equal to 0.1 ms of data, as only the high frequency data is used.
     
     Returns:
     Nothing, but writes the .mat-file in the resultpath under matname.'''
@@ -230,8 +243,10 @@ def do_TDanalysis(Chipnum,
                 for l,freq in enumerate(freqs): 
                     if freq == 'med':
                         sfreq = 50e3
+                        nperseg = 'seglen' #optimized to have information in low frequencies
                     elif freq == 'fast':
                         sfreq = 1e6
+                        nperseg = '1e-4s' #to optimize S/N in high frequencies
                     else:
                         raise ValueError(f'{freq} is a not supported data sampling frequency')
                         
@@ -242,12 +257,15 @@ def do_TDanalysis(Chipnum,
                     spphase,rejected[l,1] = rej_pulses(
                         phase,nrsgm=nrsgm,nrseg=nrseg,sfreq=sfreq,smoothdata=(freq=='fast'))                 
                     #amp:
-                    allPSDs[l,0] = np.array(calc_avgPSD(spamp,rejected[l,0],sfreq=sfreq)).T
+                    allPSDs[l,0] = np.array(calc_avgPSD(spamp,rejected[l,0],
+                                                        sfreq=sfreq,nperseg=nperseg)).T
                     #phase:
-                    allPSDs[l,1] = np.array(calc_avgPSD(spphase,rejected[l,1],sfreq=sfreq)).T
+                    allPSDs[l,1] = np.array(calc_avgPSD(spphase,rejected[l,1],
+                                                        sfreq=sfreq,nperseg=nperseg)).T
                     #cross:
                     allPSDs[l,2] = np.array(
-                        calc_avgPSD(spphase,rejected[l,1],spamp,rejected[l,0],sfreq=sfreq)).T
+                        calc_avgPSD(spphase,rejected[l,1],spamp,rejected[l,0],
+                                    sfreq=sfreq,nperseg=nperseg)).T
                     
                     
                 PSDs = np.zeros(3,dtype=object) #dims: [var (amp,phase,cross)]

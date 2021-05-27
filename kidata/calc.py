@@ -303,7 +303,7 @@ def NLcomp(Chipnum,KIDnum,Pread,SC=None,method='',var='cross'):
             lvlcompspl = interpolate.splrep(
                 S21data[:,1],interpolate.splev(
                     S21data[:,1],Respspl(Chipnum,KIDnum,Pread,var=var))**2\
-            *(1+(freq*2*S21data[:,2]/S21data[:,5])**2))
+            *(1+(S21data[:,1]*2*S21data[:,2]/S21data[:,5])**2))
         else:
             raise ValueError('{} is an invalid compensation method'.format(
                 method))

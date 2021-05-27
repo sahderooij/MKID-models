@@ -8,16 +8,14 @@ def del_ampNoise(freq,SPR,plot=False):
     '''Filter to delete amplifier noise from the spectrum. 
     The high frequency noise level is subtracted, if it is lower than mid-frequency range. 
     Otherwise the minimum of the mid-frequency range is subtracted. Only positive values are returned.'''
-    #Delete -140 datapoints
-    freq = freq[SPR!=-140]
-    SPR = SPR[SPR!=-140]
+
     #Make it non-dB
     SPRn = 10**(SPR/10)
     #Substract amplifier noise
     startr1 = freq.max()/2
     stopr1 = freq.max()
-    if SPRn[np.logical_and(freq>startr1,freq<stopr1)].size > 0:
-        SPRn -= SPRn[np.logical_and(freq>startr1,freq<stopr1)].max()
+    if SPRn[(freq>startr1) & (freq<stopr1) & (~np.isnan(SPRn))].size > 0:
+        SPRn -= SPRn[(freq>startr1) & (freq<stopr1) & (~np.isnan(SPRn))].max()
             
     #filter positive 
     freqn = freq[SPRn>0]
@@ -27,6 +25,9 @@ def del_ampNoise(freq,SPR,plot=False):
     if plot:
         plt.figure()
         plt.plot(freq,SPR)
+        plt.plot(startr1,SPR[~np.isnan(SPR)].max(),'ro')
+        plt.plot(stopr1,SPR[~np.isnan(SPR)].max(),'ro')
+
         plt.plot(freqn,SPRn)
         plt.xscale('log')
         plt.legend(['Input','Amp. noise filtered'])
@@ -58,18 +59,18 @@ def del_1fNoise(freq,SPR,plot=False):
 
 def del_1fnNoise(freq,SPR,minn=.35,plot=False):
     '''A 1/f^n spectrum is fitted and subtracted if n is higher than minn (default: 0.35).'''
-    #Delete -140 datapoints
-    freq = freq[SPR!=-140]
-    SPR = SPR[SPR!=-140]
     #Make it non-dB
     SPRn = 10**(SPR/10)
     
-    fit = curve_fit(lambda f,a,b: a*f**(-b),
-                    freq[~np.isnan(SPRn)][1:],SPRn[~np.isnan(SPRn)][1:],
-                    p0=(SPRn[~np.isnan(SPRn)][1:4].mean(),1))
-    
-    if fit[0][1] > minn:
-        SPRn -= fit[0][0]*freq**(-fit[0][1])
+    try:
+        fit = curve_fit(lambda f,a,b: a*f**(-b),
+                        freq[~np.isnan(SPRn)][1:],SPRn[~np.isnan(SPRn)][1:],
+                        p0=(SPRn[~np.isnan(SPRn)][1:4].mean(),1))
+        if fit[0][1] > minn:
+            SPRn -= fit[0][0]*freq**(-fit[0][1])
+    except:
+        #do nothing
+        freqn,SPRn = (freq,SPR)    
     
     #filter positive 
     freqn = freq[SPRn>0]

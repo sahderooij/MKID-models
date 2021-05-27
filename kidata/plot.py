@@ -71,15 +71,15 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',SC=None,S
     else:
         raise ValueError('Invalid Spectrum Selection')
         
-    if lvlcomp != '':
-        if SC is None:
-            SC_inst = SuperCond.init_SC(Chipnum,KIDnum,**SCkwargs)
-        else:
-            SC_inst = SC
-    else:
-        SC_inst = SuperCond.Al()
-        
+      
     for KIDnum in KIDlist:
+        if lvlcomp != '':
+            if SC is None:
+                SC_inst = SuperCond.init_SC(Chipnum,KIDnum,**SCkwargs)
+            else:
+                SC_inst = SC
+        else:
+            SC_inst = SuperCond.Al()
         Preadar = _selectPread(pltPread,io.get_grPread(TDparam,KIDnum))
         if ax12 is None:
             fig,axs = plt.subplots(len(Preadar),len(specs),
@@ -133,15 +133,18 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',SC=None,S
                     
                     if plttres:
                         Tind = np.abs(S21data[:,1]-Temp[i]*1e-3).argmin()
-                        axs[ax1,ax2].annotate('',(S21data[Tind,5]/(2*S21data[Tind,2]),
-                                                  ylim[1]),
-                                              (S21data[Tind,5]/(2*S21data[Tind,2]),
-                                                  ylim[1]+10),
-                                             arrowprops=dict(arrowstyle='->',color=cmap(norm(Temp[i]))),
+                        fres = S21data[Tind,5]/(2*S21data[Tind,2])
+                        axs[ax1,ax2].annotate('',(fres,
+                                                  SPR[~np.isnan(SPR)][np.abs(fres-freq[~np.isnan(SPR)]).argmin()]),
+                                              (fres,
+                                               SPR[~np.isnan(SPR)][np.abs(fres-freq[~np.isnan(SPR)]).argmin()]+10),
+                                             arrowprops=dict(
+                                                 arrowstyle='simple',
+                                                 color=cmap(norm(Temp[i])),ec='k'),
                                              annotation_clip=False)
         axs[0,0].set_xlim(*xlim)
         axs[0,0].set_ylim(*ylim)
-        plt.tight_layout(rect=(0,0,1,1-.12/len(Preadar)))
+#         plt.tight_layout()
     if ax12 is None and len(KIDlist) == 1:
         return fig,axs
                     
