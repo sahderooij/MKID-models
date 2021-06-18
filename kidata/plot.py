@@ -45,7 +45,7 @@ def _selectPread(pltPread,Preadar):
     return Pread
     
 
-def spec(Chipnum,KIDlist=None,pltPread='all',spec=['cross'],lvlcomp='',SC=None,SCkwargs={},clbar=True,
+def spec(Chipnum,KIDlist=None,pltPread='all',spec='all',lvlcomp='',SC=None,SCkwargs={},clbar=True,
               del1fNoise=False,delampNoise=False,del1fnNoise=False,suboffres=False,
               plttres=False,
               Tminmax=(0,500),ax12=None,
@@ -362,6 +362,7 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
                     T = T/(SC_inst.kbTc/(const.Boltzmann/const.e*1e6))
                 else:
                     T = T*1e3
+                    
                 axs[0].plot(T,taukaplan,color=clr,linestyle='--',linewidth=2.,
                            label='Kaplan, $\\tau_{qp}$')
             
@@ -411,10 +412,8 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
             if plttres:
                 S21data = io.get_S21data(Chipnum,KIDnum,Pread)
                 tresline, = axs[0].plot(S21data[:,1]/S21data[0,21] if pltTTc else S21data[:,1]*1e3,
-                            S21data[:,2]/(np.pi*S21data[:,5])*1e6,color=clr,linestyle=':')
+                                        S21data[:,2]/(np.pi*S21data[:,5])*1e6,color=clr,linestyle=':')
                 axs[0].legend((tresline,),('$\\tau_{res}$',))
-                
-                    
         axs[0].set_yscale('log')
         for i in range(2):
             if pltTTc:
@@ -422,13 +421,13 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
             else:
                 axs[i].set_xlabel('Temperature (mK)')
         axs[0].set_ylabel(r'$\tau_{qp}^*$ (µs)')
-        
+
         if lvlcomp == 'Resp':
             axs[1].set_ylabel(r'Noise Level/$\mathcal{R}^2(T)$ (dB/Hz)')
-        elif lvlcomp == 'RespV':            
+        elif lvlcomp == 'RespV':
             axs[1].set_ylabel(r'Noise Level/$(\mathcal{R}^2(T)V)$ (dB/Hz)')
-        elif lvlcomp == 'RespVtescTc':   
-            axs[1].set_ylabel(r'Noise Level/$(\mathcal{R}^2(T)\chi)$ (dB/Hz)')   
+        elif lvlcomp == 'RespVtescTc':
+            axs[1].set_ylabel(r'Noise Level/$(\mathcal{R}^2(T)\chi)$ (dB/Hz)')
         elif lvlcomp == '':
             axs[1].set_ylabel(r'Noise Level (dB/Hz)')
         elif lvlcomp == 'RespLowT':
@@ -441,18 +440,18 @@ def ltnlvl(Chipnum,KIDlist=None,pltPread='all',spec='cross',Tminmax=None,startst
             plt.close()
     if ax12 is None:
         return fig,axs
-            
+
 def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         startstopf=(None,None),
         delampNoise=False,del1fNoise=False,del1fnNoise=False,Tmax=500,relerrthrs=.3,
         pltThrm=True,pltNqpQi=False,splitT=0,pltNqptau=False,SC=None,SCkwargs={},nqpaxis=True,
-        fig=None,ax=None,label=None,clr=None):
+        fig=None,ax=None,label=None,color=None,fmt='-o'):
     '''Plots the number of quasiparticle calculated from the noise levels and lifetimes from PSDs.
     options similar to options in ltnlvl.
     
     pltThrm -- also plot thermal line (needs constants)
     pltNqpQi -- plot Nqp from Qi as well (needs constants)
-        splitT -- makes NqpQi line dashed below this T
+    splitT -- makes NqpQi line dashed below this T
     pltNqptau -- plot Nqp from lifetime only (need constants)
     nqpaxis -- also shows density on right axis.'''
     
@@ -499,18 +498,18 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         mask = ~np.isnan(Nqp)
         mask[mask] = Nqperr[mask]/Nqp[mask] <= relerrthrs
         if Preadar.size > 1:
-            clr = cmap(norm(-1*Pread))
+            color = cmap(norm(-1*Pread))
         elif pltPread == 'min':
-            clr = 'purple'
+            color = 'purple'
         elif pltPread == 'max':
-            clr = 'gold'
+            color = 'gold'
             
         dataline = ax.errorbar(Temp[mask],Nqp[mask],yerr=Nqperr[mask],
-                    color=clr,marker='o',mec='k',capsize=2.,label=label)
+                    color=color,fmt=fmt,mec='k',capsize=2.,label=label)
         if pltNqptau:
             Nqp_ = SC_inst.V*kidcalc.nqpfromtau(taut,SC_inst)
             tauline, = ax.plot(Temp[mask],Nqp_[mask],
-                   color=clr,zorder=len(ax.lines)+1,
+                   color=color,zorder=len(ax.lines)+1,
                     label='$\\tau_{qp}^*$')
     if pltNqpQi:
         Preadar = io.get_S21Pread(Chipnum,KIDnum)
@@ -521,13 +520,13 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
             totalT = T[mask]
             totalNqp = Nqp[mask]
             if len(Preadar) == 1:
-                clr = 'g'
+                color = 'g'
             else:
-                clr = cmap(norm(closestPread))
+                color = cmap(norm(closestPread))
             Qline, = ax.plot(totalT[totalT>splitT]*1e3,totalNqp[totalT>splitT],
-                    linestyle='-',color=clr,zorder=len(ax.lines)+1,label='$Q_i$')
+                    linestyle='-',color=color,zorder=len(ax.lines)+1,label='$Q_i$')
             ax.plot(totalT[totalT<splitT]*1e3,totalNqp[totalT<splitT],
-                    linestyle='--',color=clr,zorder=len(ax.lines)+1)
+                    linestyle='--',color=color,zorder=len(ax.lines)+1)
     if pltThrm:
         T = np.linspace(*ax.get_xlim(),100)
         NqpT = np.zeros(100)
@@ -558,7 +557,7 @@ def Nqp(Chipnum,KIDnum,pltPread='all',spec='cross',
         clb.ax.set_position([l+.12,b,w,h])
         
 def Qif0(Chipnum,KIDnum,color='Pread',Tmax=.5,pltPread='all',fracfreq=False,
-        fig=None,ax12=None):
+        fig=None,ax12=None,xaxis='T',**kwargs):
     '''Plot the internal quality factor and resonance frequency from S21-measurement.
     The color gives different read powers, but can be set to Pint as well.
     If fracfreq is True, the y-axis is df/f0, instead of f0.'''
@@ -588,20 +587,45 @@ def Qif0(Chipnum,KIDnum,color='Pread',Tmax=.5,pltPread='all',fracfreq=False,
             clr = cmap(norm(-Pread))
         elif color == 'Pint':
             clr = cmap(norm(Pint[Preadar == Pread][0]))
-        T = S21data[:,1]
-        axs[0].plot(T[T<Tmax]*1e3,S21data[T<Tmax,4],color=clr)
-        if fracfreq:
-            axs[1].plot(T[T<Tmax]*1e3,(S21data[T<Tmax,5]-S21data[0,5])/S21data[0,5]*1e5,color=clr)
         else:
-            axs[1].plot(T[T<Tmax]*1e3,S21data[T<Tmax,5]*1e-9,color=clr)
+            clr = color
+            
+        T = S21data[:,1]
+        
+        #set what will be on the x and y axis
+        if xaxis == 'T':
+            xvalues = T*1e3
+            yvaluesQ = S21data[:,4]
+        elif xaxis == 'Nqp':
+            xvalues = S21data[:,12]
+            yvaluesQ = 1/S21data[:,4]
+        else:
+            raise ValueError('Not a valid xaxis argument')
+        
+        axs[0].plot(xvalues[T<Tmax],yvaluesQ[T<Tmax],color=clr,**kwargs)
+        if fracfreq:
+            axs[1].plot(
+                xvalues[T<Tmax],
+                (S21data[T<Tmax,5]-S21data[0,5])/S21data[0,5],
+                color=clr,**kwargs)
+        else:
+            axs[1].plot(xvalues[T<Tmax],S21data[T<Tmax,5]*1e-9,color=clr,**kwargs)
         
     for ax in axs:
-        ax.set_xlabel('Temperature (mK)')
-        ax.get_yaxis().get_major_formatter().set_useOffset(False)
-    axs[0].set_ylabel('$Q_i$')
-    axs[0].ticklabel_format(axis='y',style='sci',scilimits=(0,0))
+        if xaxis == 'T':
+            ax.set_xlabel('Temperature (mK)')
+        elif xaxis == 'Nqp':
+            ax.set_xlabel('$N_{qp}$')
+            ax.ticklabel_format(axis='x',style='sci',scilimits=(0,0))
+    
+    if xaxis == 'T':
+        axs[0].set_ylabel('$Q_i$')
+        axs[0].set_yscale('log')
+    elif xaxis == 'Nqp':
+        axs[0].set_ylabel('$1/Q_i$')
+        
     if fracfreq:
-        axs[1].set_ylabel('$10^5~\delta f_0/f_0$')
+        axs[1].set_ylabel('$\delta f_{res}/f_0$')
     else:
         axs[1].set_ylabel('f0 (GHz)')
     fig.tight_layout()

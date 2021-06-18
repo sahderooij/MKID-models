@@ -78,7 +78,7 @@ def D(kbT, SC):
 
 def nqp(kbT, D, SC):
     '''Thermal average quasiparticle denisty. It can handle arrays 
-    and uses a low temperature approximation, if appropriate.'''
+    and uses a low temperature approximation, if kbT < Delta/20.'''
     if (kbT<D/20).all():
         return 2*SC.N0*np.sqrt(2*np.pi*kbT*D)*np.exp(-D/kbT)
     else:

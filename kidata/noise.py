@@ -1,53 +1,162 @@
 import matplotlib.pyplot as plt
-from scipy.signal import savgol_filter,csd,welch
+from scipy.signal import csd,welch
 from scipy.interpolate import splrep,splev
 from scipy.io import savemat
-from scipy.ndimage.filters import uniform_filter1d
 import numpy as np
 import glob
 from tqdm.notebook import tnrange
 import warnings
+import os
 
 from kidata import io,plot,calc,filters
+from kidata.IQ import to_ampphase, subtr_offset, smooth
 
-def to_ampphase(data):
-    '''Converts the I and Q variables from the raw .dat file to (normalized) amplitude and phase.
-    Takes: 
-    data loaded by np.fromfile(path,dtype='>f8').reshape(-1,2)
+def do_TDanalysis(Chipnum,
+        resultpath = None,
+        matname = 'TDresults',
+        ppd = 30,
+        nrseg = 32,
+        nrsgm = 6,
+        freqs=['med','fast']):
+    '''Main function of this module that executes the noise post-processing.
+    It writes the number of rejected segments and output PSDs in the same format as 
+    the algorithm by PdV (.mat-file).
+    Takes:
+    Chipnum -- Chip number to preform the analysis on
+    resultpath -- output where the resulting .mat-file is written. Default is NoiseTDanalyse folder.
+    matname -- name of the output .mat-file. Default is TDresults.
+    ppd -- points per decade to downsample the PSDs (default 30).
+    nrseg -- number of segments for the pulse rejection.
+    nrsgm -- number of standard deviations to reject a segment in pulse rejection (default 6).
+    freqs -- list of data types to be used. Default is ['med','fast'], which is both 50 kHz and  
+             1 MHz data. These spectra will be stitched together at 20 kHz. The fast data is
+             processed with nperseg equal to 0.1 ms of data, as only the high frequency data is used.
     
     Returns:
-    Amplitude, Phase: numpy arrays'''
+    Nothing, but writes the .mat-file in the resultpath under matname.'''
     
-    Amp = np.sqrt(data[:,0]**2+data[:,1]**2)
-    Amp /= Amp.mean()
-    Phase = (np.pi - \
-             (np.arctan2(
-        data[:,1],data[:,0]) % (2*np.pi)))
-    return Amp,Phase
+    if resultpath is None:
+        resultpath = io.get_datafld()+f'{Chipnum}/NoiseTDanalyse/'
+    
+    #find all KIDs, Read powers and Temperatures
+    assert glob.glob(io.get_datafld() + f'{Chipnum}/Noise_vs_T/TD_2D/*.bin'), 'Data not found'
+    
+    KIDPrT = np.array([[int(i.split('\\')[-1].split('_')[0][3:]),
+                        int(i.split('\\')[-1].split('_')[1][:-3]),
+                        int(i.split('\\')[-1].split('_')[4][3:-4])] 
+              for i in glob.iglob(io.get_datafld() + \
+                                  f'{Chipnum}/Noise_vs_T/TD_2D/*TD{freqs[0]}*.bin')])
+    KIDs = np.unique(KIDPrT[:,0])
+    
+    #initialize:
+    TDparam = np.empty((1,len(KIDs)),
+                       dtype=[
+                           ('kidnr','O'),('Pread','O'),
+                           ('Temp','O'),('nrrejectedmed','O'),
+                           ('nrrejectedfast','O'),
+                           ('fmtotal','O'),('SPRrealneg','O'),
+                           ('SPRrealpos','O'),('SPRimagneg','O'),
+                           ('SPRimagpos','O'),('SPPtotal','O'),
+                           ('SRRtotal','O')
+                       ])
 
-def subtr_offset(data,plot=False):
-    '''Subtracts a quadratic offset from a time stream (data) to compensate temperature drifts.
-    Optionally plots the quadratic fit.'''
-    t = np.arange(len(data))
-    p = np.polyfit(t[::int(len(data)/1e3)],
-                   data[::int(len(data)/1e3)],2) #speed-up the fit by selecting points
-    if plot:
-        plt.figure()
-        plt.plot(t,data)
-        plt.plot(t,np.polyval(p,t))
-        plt.show();plt.close()
-    return data - np.polyval(p,t)
+    for i in tnrange(len(KIDs),desc='KID',leave=False):
+        TDparam['kidnr'][0,i] = np.array([[KIDs[i]]])
 
-def smooth(data,tau,sfreq):
-    '''Smooths a time stream with half of the lifetime (tau) via a moving average.
-    Takes:
-    data -- time stream data
-    tau -- lifetime of pulses in seconds
-    sfreq -- sample frequency of the data.'''
-    wnd = int(tau/2*sfreq)
-    if wnd % 2 != 1:
-        wnd += 1
-    return uniform_filter1d(data,wnd,mode='wrap')
+        Preads = np.unique(KIDPrT[KIDPrT[:,0]==KIDs[i],1])
+        TDparam['Pread'][0,i],TDparam['Temp'][0,i] = np.zeros((2,len(Preads),np.unique(
+            KIDPrT[KIDPrT[:,0]==KIDs[i],1],return_counts=True)[1].max()))
+
+        TDparam['nrrejectedmed'][0,i],TDparam['nrrejectedfast'][0,i],\
+        TDparam['fmtotal'][0,i],TDparam['SPRrealneg'][0,i],TDparam['SPRrealpos'][0,i],\
+        TDparam['SPRimagneg'][0,i],TDparam['SPRimagpos'][0,i],TDparam['SPPtotal'][0,i],\
+        TDparam['SRRtotal'][0,i] = np.full((9,len(Preads),np.unique(
+            KIDPrT[KIDPrT[:,0]==KIDs[i],1],return_counts=True)[1].max()),np.nan,dtype='O')
+        
+        for j in tnrange(len(Preads),desc='Pread',leave=False):
+            Temps = np.unique(KIDPrT[np.logical_and(KIDPrT[:,0]==KIDs[i],
+                                                        KIDPrT[:,1]==Preads[j]),2])
+            for k in tnrange(len(Temps),desc='Temp',leave=False):
+                TDparam['Pread'][0,i][j,k] = Preads[j]
+                TDparam['Temp'][0,i][j,k] = Temps[k]
+                
+                allPSDs = np.zeros((len(freqs),3),dtype=object) #dims: [sfreq,var (amp,phase,cross)]
+                rejected = np.zeros((len(freqs),2),dtype=object) #dims: [sfreq, var (amp, phase)]
+                for l,freq in enumerate(freqs): 
+                    if freq == 'med':
+                        sfreq = 50e3
+                        nperseg = 'seglen' #optimized to have information in low frequencies
+                    elif freq == 'fast':
+                        sfreq = 1e6
+                        nperseg = '1e-4s' #to optimize S/N in high frequencies
+                    else:
+                        raise ValueError(f'{freq} is a not supported data sampling frequency')
+                        
+                    noisedata = io.get_noisebin(Chipnum,KIDs[i],Preads[j],Temps[k],freq=freq)
+                    amp,phase = to_ampphase(noisedata)
+                    spamp,rejected[l,0] = rej_pulses(
+                        amp,nrsgm=nrsgm,nrseg=nrseg,sfreq=sfreq,smoothdata=(freq=='fast'))
+                    spphase,rejected[l,1] = rej_pulses(
+                        phase,nrsgm=nrsgm,nrseg=nrseg,sfreq=sfreq,smoothdata=(freq=='fast'))                 
+                    #amp:
+                    allPSDs[l,0] = np.array(calc_avgPSD(spamp,rejected[l,0],
+                                                        sfreq=sfreq,nperseg=nperseg)).T
+                    #phase:
+                    allPSDs[l,1] = np.array(calc_avgPSD(spphase,rejected[l,1],
+                                                        sfreq=sfreq,nperseg=nperseg)).T
+                    #cross:
+                    allPSDs[l,2] = np.array(
+                        calc_avgPSD(spphase,rejected[l,1],spamp,rejected[l,0],
+                                    sfreq=sfreq,nperseg=nperseg)).T
+                    
+                    
+                PSDs = np.zeros(3,dtype=object) #dims: [var (amp,phase,cross)]
+                for varind in range(3):
+                    if len(freqs) == 1:
+                        PSDs[varind] = logsmooth(np.real(allPSDs[:1,varind][0][:,0]),
+                                                 allPSDs[:1,varind][0][:,1],ppd)
+                    elif len(freqs) == 2:#check if multiple spectra need to be stichted.
+                        medind = (np.array(freqs)=='med')
+                        fastind = (np.array(freqs)=='fast')
+                        stichted = np.vstack((
+                            allPSDs[medind,varind][0][allPSDs[medind,varind][0][:,0] < 2e4,:],
+                            allPSDs[fastind,varind][0][allPSDs[fastind,varind][0][:,0] > 2e4,:]))
+                        PSDs[varind] = logsmooth(np.real(stichted[:,0]),stichted[:,1],ppd)
+                
+                #write to TDparam:
+                if all(np.logical_and(PSDs[0][0] == PSDs[1][0],PSDs[1][0]==PSDs[2][0])):
+                    for freq in freqs:
+                        TDparam['nrrejected'+freq][0,i][j,k] = \
+                        np.logical_or(rejected[(np.array(freqs)==freq),0][0],
+                                      rejected[(np.array(freqs)==freq),1][0]).sum()
+                    TDparam['fmtotal'][0,i][j,k] = PSDs[0][0]
+                    with warnings.catch_warnings():
+                        warnings.simplefilter('ignore',RuntimeWarning)
+                        TDparam['SPRrealneg'][0,i][j,k] = \
+                            10*np.log10(-1*np.clip(np.real(PSDs[2][1]),None,0))
+                        TDparam['SPRrealpos'][0,i][j,k] = \
+                            10*np.log10(np.clip(np.real(PSDs[2][1]),0,None))
+                        TDparam['SPRimagneg'][0,i][j,k] = \
+                            10*np.log10(-1*np.clip(np.imag(PSDs[2][1]),None,0))
+                        TDparam['SPRimagpos'][0,i][j,k] = \
+                            10*np.log10(np.clip(np.imag(PSDs[2][1]),0,None))
+                    TDparam['SPPtotal'][0,i][j,k] = 10*np.log10(np.real(PSDs[1][1]))
+                    TDparam['SRRtotal'][0,i][j,k] = 10*np.log10(np.real(PSDs[0][1]))
+                else:
+                    warnings.warn('different frequencies, writing nans')
+                    TDparam['nrrejectedmed'][0,i][j,k],TDparam['nrrejectedfast'][0,i][j,k],\
+                    TDparam['fmtotal'][0,i][j,k],\
+                    TDparam['SPRrealneg'][0,i][j,k], TDparam['SPRrealpos'][0,i][j,k],\
+                    TDparam['SPRimagneg'][0,i][j,k],TDparam['SPRimagpos'][0,i][j,k],\
+                    TDparam['SPPtotal'][0,i][j,k], TDparam['SRRtotal'][0,i][j,k] = \
+                        np.full([9,1],np.nan)
+                    
+    if os.path.exists(resultpath):
+        savemat(resultpath + matname + '.mat',{'TDparam':TDparam})   
+    else:
+        warnings.warn(f'Result path \"{resultpath}\" does not exsist. Making it.')
+        os.makedirs(resultpath)
+        savemat(resultpath + matname + '.mat',{'TDparam':TDparam})   
 
 def rej_pulses(data,nrsgm=6,nrseg=32,sfreq=50e3,
                smoothdata=False,plot=False):
@@ -169,145 +278,3 @@ def logsmooth(freq,psd,ppd):
     else:
         return np.full([2,1],np.nan)
 
-def do_TDanalysis(Chipnum,
-        resultpath = None,
-        matname = 'TDresults',
-        ppd = 30,
-        nrseg = 32,
-        nrsgm = 6,
-        freqs=['med','fast']):
-    '''Main function of this module that executes the noise post-processing.
-    It writes the number of rejected segments and output PSDs in the same format as 
-    the algorithm by PdV (.mat-file).
-    Takes:
-    Chipnum -- Chip number to preform the analysis on
-    resultpath -- output where the resulting .mat-file is written. Default is NoiseTDanalyse folder.
-    matname -- name of the output .mat-file. Default is TDresults.
-    ppd -- points per decade to downsample the PSDs (default 30).
-    nrseg -- number of segments for the pulse rejection.
-    nrsgm -- number of standard deviations to reject a segment in pulse rejection (default 6).
-    freqs -- list of data types to be used. Default is ['med','fast'], which is both 50 kHz and  
-             1 MHz data. These spectra will be stitched together at 20 kHz. The fast data is
-             processed with nperseg equal to 0.1 ms of data, as only the high frequency data is used.
-    
-    Returns:
-    Nothing, but writes the .mat-file in the resultpath under matname.'''
-    
-    if resultpath is None:
-        resultpath = io.get_datafld()+f'{Chipnum}/NoiseTDanalyse/'
-    
-    #find all KIDs, Read powers and Temperatures
-    assert glob.glob(io.get_datafld() + f'{Chipnum}/Noise_vs_T/TD_2D/*.bin'), 'Data not found'
-    
-    KIDPrT = np.array([[int(i.split('\\')[-1].split('_')[0][3:]),
-                        int(i.split('\\')[-1].split('_')[1][:-3]),
-                        int(i.split('\\')[-1].split('_')[4][3:-4])] 
-              for i in glob.iglob(io.get_datafld() + \
-                                  f'{Chipnum}/Noise_vs_T/TD_2D/*TD{freqs[0]}*.bin')])
-    KIDs = np.unique(KIDPrT[:,0])
-    
-    #initialize:
-    TDparam = np.empty((1,len(KIDs)),
-                       dtype=[
-                           ('kidnr','O'),('Pread','O'),
-                           ('Temp','O'),('nrrejectedmed','O'),
-                           ('nrrejectedfast','O'),
-                           ('fmtotal','O'),('SPRrealneg','O'),
-                           ('SPRrealpos','O'),('SPRimagneg','O'),
-                           ('SPRimagpos','O'),('SPPtotal','O'),
-                           ('SRRtotal','O')
-                       ])
-
-    for i in tnrange(len(KIDs),desc='KID',leave=False):
-        TDparam['kidnr'][0,i] = np.array([[KIDs[i]]])
-
-        Preads = np.unique(KIDPrT[KIDPrT[:,0]==KIDs[i],1])
-        TDparam['Pread'][0,i],TDparam['Temp'][0,i] = np.zeros((2,len(Preads),np.unique(
-            KIDPrT[KIDPrT[:,0]==KIDs[i],1],return_counts=True)[1].max()))
-
-        TDparam['nrrejectedmed'][0,i],TDparam['nrrejectedfast'][0,i],\
-        TDparam['fmtotal'][0,i],TDparam['SPRrealneg'][0,i],TDparam['SPRrealpos'][0,i],\
-        TDparam['SPRimagneg'][0,i],TDparam['SPRimagpos'][0,i],TDparam['SPPtotal'][0,i],\
-        TDparam['SRRtotal'][0,i] = np.full((9,len(Preads),np.unique(
-            KIDPrT[KIDPrT[:,0]==KIDs[i],1],return_counts=True)[1].max()),np.nan,dtype='O')
-        
-        for j in tnrange(len(Preads),desc='Pread',leave=False):
-            Temps = np.unique(KIDPrT[np.logical_and(KIDPrT[:,0]==KIDs[i],
-                                                        KIDPrT[:,1]==Preads[j]),2])
-            for k in tnrange(len(Temps),desc='Temp',leave=False):
-                TDparam['Pread'][0,i][j,k] = Preads[j]
-                TDparam['Temp'][0,i][j,k] = Temps[k]
-                
-                allPSDs = np.zeros((len(freqs),3),dtype=object) #dims: [sfreq,var (amp,phase,cross)]
-                rejected = np.zeros((len(freqs),2),dtype=object) #dims: [sfreq, var (amp, phase)]
-                for l,freq in enumerate(freqs): 
-                    if freq == 'med':
-                        sfreq = 50e3
-                        nperseg = 'seglen' #optimized to have information in low frequencies
-                    elif freq == 'fast':
-                        sfreq = 1e6
-                        nperseg = '1e-4s' #to optimize S/N in high frequencies
-                    else:
-                        raise ValueError(f'{freq} is a not supported data sampling frequency')
-                        
-                    noisedata = io.get_noisebin(Chipnum,KIDs[i],Preads[j],Temps[k],freq=freq)
-                    amp,phase = to_ampphase(noisedata)
-                    spamp,rejected[l,0] = rej_pulses(
-                        amp,nrsgm=nrsgm,nrseg=nrseg,sfreq=sfreq,smoothdata=(freq=='fast'))
-                    spphase,rejected[l,1] = rej_pulses(
-                        phase,nrsgm=nrsgm,nrseg=nrseg,sfreq=sfreq,smoothdata=(freq=='fast'))                 
-                    #amp:
-                    allPSDs[l,0] = np.array(calc_avgPSD(spamp,rejected[l,0],
-                                                        sfreq=sfreq,nperseg=nperseg)).T
-                    #phase:
-                    allPSDs[l,1] = np.array(calc_avgPSD(spphase,rejected[l,1],
-                                                        sfreq=sfreq,nperseg=nperseg)).T
-                    #cross:
-                    allPSDs[l,2] = np.array(
-                        calc_avgPSD(spphase,rejected[l,1],spamp,rejected[l,0],
-                                    sfreq=sfreq,nperseg=nperseg)).T
-                    
-                    
-                PSDs = np.zeros(3,dtype=object) #dims: [var (amp,phase,cross)]
-                for varind in range(3):
-                    if len(freq) == 1:#check if multiple spectra need to be stichted.
-                        PSDs[varind] = logsmooth(np.real(allPSDs[0,varind][0][:,0]),
-                                                 allPSDs[0,varind][0][:,1],ppd)
-                    elif len(freqs) == 2:
-                        medind = (np.array(freqs)=='med')
-                        fastind = (np.array(freqs)=='fast')
-                        stichted = np.vstack((
-                            allPSDs[medind,varind][0][allPSDs[medind,varind][0][:,0] < 2e4,:],
-                            allPSDs[fastind,varind][0][allPSDs[fastind,varind][0][:,0] > 2e4,:]))
-                        PSDs[varind] = logsmooth(np.real(stichted[:,0]),stichted[:,1],ppd)
-                
-                #write to TDparam:
-                if all(np.logical_and(PSDs[0][0] == PSDs[1][0],PSDs[1][0]==PSDs[2][0])):
-                    TDparam['nrrejectedmed'][0,i][j,k] = \
-                        np.logical_or(rejected[(np.array(freqs)=='med'),0][0],
-                                      rejected[(np.array(freqs)=='med'),1][0]).sum()
-                    TDparam['nrrejectedfast'][0,i][j,k] = \
-                        np.logical_or(rejected[np.array(freqs) == 'fast',0][0],
-                                      rejected[np.array(freqs) == 'fast',1][0]).sum()
-                    TDparam['fmtotal'][0,i][j,k] = PSDs[0][0]
-                    with warnings.catch_warnings():
-                        warnings.simplefilter('ignore',RuntimeWarning)
-                        TDparam['SPRrealneg'][0,i][j,k] = \
-                            10*np.log10(-1*np.clip(np.real(PSDs[2][1]),None,0))
-                        TDparam['SPRrealpos'][0,i][j,k] = \
-                            10*np.log10(np.clip(np.real(PSDs[2][1]),0,None))
-                        TDparam['SPRimagneg'][0,i][j,k] = \
-                            10*np.log10(-1*np.clip(np.imag(PSDs[2][1]),None,0))
-                        TDparam['SPRimagpos'][0,i][j,k] = \
-                            10*np.log10(np.clip(np.imag(PSDs[2][1]),0,None))
-                    TDparam['SPPtotal'][0,i][j,k] = 10*np.log10(np.real(PSDs[1][1]))
-                    TDparam['SRRtotal'][0,i][j,k] = 10*np.log10(np.real(PSDs[0][1]))
-                else:
-                    warnings.warn('different frequencies, writing nans')
-                    TDparam['nrrejectedmed'][0,i][j,k],TDparam['fmtotal'][0,i][j,k],\
-                    TDparam['SPRrealneg'][0,i][j,k], TDparam['SPRrealpos'][0,i][j,k],\
-                    TDparam['SPRimagneg'][0,i][j,k],TDparam['SPRimagpos'][0,i][j,k],\
-                    TDparam['SPPtotal'][0,i][j,k], TDparam['SRRtotal'][0,i][j,k] = \
-                        np.full([8,1],np.nan)
-                    
-    savemat(resultpath + matname + '.mat',{'TDparam':TDparam})   
