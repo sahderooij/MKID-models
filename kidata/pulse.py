@@ -135,7 +135,7 @@ def calc_pulseavg(
     return "script ran succesful"
 
 
-def select_proms(filelocation, nstream=10, maxpulses=100):
+def select_proms(filelocation, nstream=5, maxpulses=100):
     # Shows you 1 timestream and a hist of the peaks and then asks you to select the wanted prominences
     KIDPrT = io.get_avlbins(filelocation)
     minmax_proms = {}

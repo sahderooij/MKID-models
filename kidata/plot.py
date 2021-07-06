@@ -46,6 +46,7 @@ def _selectPread(pltPread,Preadar):
     
 
 def spec(Chipnum,KIDlist=None,pltPread='all',spec='all',lvlcomp='',SC=None,SCkwargs={},clbar=True,
+         cmap=None,norm=None,
               del1fNoise=False,delampNoise=False,del1fnNoise=False,suboffres=False,
               plttres=False,
               Tminmax=(0,500),ax12=None,
@@ -97,8 +98,9 @@ def spec(Chipnum,KIDlist=None,pltPread='all',spec='all',lvlcomp='',SC=None,SCkwa
                 Temp = np.intersect1d(Temp,io.get_grTemp(TDparamoffres,KIDnum,Pread))
                 
             Temp = Temp[np.logical_and(Temp<Tminmax[1],Temp>Tminmax[0])]
-            cmap = matplotlib.cm.get_cmap('viridis')
-            norm = matplotlib.colors.Normalize(Temp.min(),Temp.max())
+            if cmap is None or norm is None:
+                cmap = matplotlib.cm.get_cmap('viridis')
+                norm = matplotlib.colors.Normalize(Temp.min(),Temp.max())
             if clbar:
                 clb = plt.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap),
                                    ax=axs[ax1,-1])
