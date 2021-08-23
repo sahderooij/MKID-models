@@ -7,4 +7,4 @@ noise -- postprocesses noise files, and calculates PSDs.
 filters -- adjusts the PSDs with a certain filter, like deleting the amplifier noise.
 plot -- visualizes the (calculated) data.'''
 
-import kidata.calc,kidata.filters,kidata.io,kidata.noise,kidata.plot
+import kidata.calc, kidata.filters, kidata.io, kidata.noise, kidata.plot, kidata.pulse, kidata.IQ

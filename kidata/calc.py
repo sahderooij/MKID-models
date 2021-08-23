@@ -382,10 +382,11 @@ def tau_pulse(
     tfit -- tuple to specify the fitting window, default is (10,1e3)
     reterr -- boolean to return error
     plot -- boolean to plot the fit
-    
+
     Returns:
     tau -- in µs
     optionally the fitting error"""
+
     t = np.arange(len(pulse)) - pulsestart
     fitmask = np.logical_and(t > tfit[0], t < tfit[1])
     t2 = t[fitmask]

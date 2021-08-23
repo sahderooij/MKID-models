@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import warnings
 import scipy.io
 import glob
@@ -17,7 +18,14 @@ def get_datafld():
             - FFT: other files from the measurement 
                 - 2D
         - NoiseTDanalyse: the results of the noise post-processing.
-            - TDresults.mat: same structure as the MATLAB routine for PdV.'''
+            - TDresults.mat: same structure as the MATLAB routine for PdV.
+        - Pulse
+            - wavelength folders (e.g. \\1545nm\\)
+                - TD_2D with bin files of the pulse data streams
+                - KID{KIDnum}_{Pread}dBm__TmK{Temperature}_avgpluse.csv
+                - KID{KIDnum}_{Pread}dBm__TmK{Temperature}_avgpluse)info.csv, which
+                are the results of the average pulse calculation from 
+                kidata.pulse.calc_avgpulse().'''
 
     datafld = "D:/MKIDdata/"
     assert glob.glob(datafld), 'data folder not found'
@@ -128,37 +136,89 @@ def get_S21data(Chipnum, KIDnum, Pread=None):
 
 
 def get_avlbins(folder):
-    return np.array([[int(i.split('\\')[-1].split('_')[0][3:]),
+    bins = np.array([[int(i.split('\\')[-1].split('_')[0][3:]),
                       int(i.split('\\')[-1].split('_')[1][:-3]),
                       int(i.split('\\')[-1].split('_')[4][3:-4])]
                      for i in glob.iglob(folder + '/*TDmed*.bin')])
+    bindf = pd.DataFrame(bins, columns=['KID', 'Pread', 'T']).sort_values(
+        by=['KID', 'Pread', 'T'])
+    return bindf.values
 
 
-def get_pulseKIDs(Chipnum):
+def get_avgpulse(Chipnum, KID, Pread, T, wvl, std=False):
+    '''Returns the phase and amplitude data (in that order)
+    of the average pulse, calculated from kidata.pulse.calc_avgpulse.
+    if std is True, the standard deviation is returned, instead of
+    the average.'''
+    data = np.genfromtxt(
+        get_datafld() +
+        f'{Chipnum}\\Pulse\\{wvl}nm\\KID{KID}_{Pread}dBm__TmK{T}_avgpulse.csv',
+        delimiter=',', skip_header=1)
+    ind = 0
+    if std:
+        ind += 1
+    return data[:, ind], data[:, ind + 2]
+
+
+def get_avgpulseinfo(Chipnum, KID, Pread, T, wvl):
+    '''Returns the stream number (vis{nr}), location and prominence of
+    the peaks used in the kidata.pulse.calc_avgpulse() function.'''
+    strms, locs, proms = np.genfromtxt(
+        get_datafld() +
+        f'{Chipnum}\\Pulse\\{wvl}nm\\KID{KID}_{Pread}dBm__TmK{T}_avgpulse_info.csv',
+        delimiter=',', skip_header=1).T
+    return strms.astype(int), locs.astype(int), proms
+
+
+def get_pulsebin(Chipnum, KID, Pread, T, wvl, strm):
+    if type(strm) != str:
+        return np.fromfile(
+            get_datafld() +
+            (f"{Chipnum}\\Pulse\\{wvl}nm\\TD_2D\\KID{KID}_{Pread}dBm"
+             f"__TDvis{int(strm)}_TmK{T}.bin"),
+            dtype=">f8").reshape(-1, 2)
+    else:
+        return np.fromfile(
+            get_datafld() +
+            (f"{Chipnum}\\Pulse\\{wvl}nm\\TD_2D\\KID{KID}_{Pread}dBm"
+             f"__TD{strm}_TmK{T}.bin"),
+            dtype=">f8").reshape(-1, 2)
+
+
+def get_pulsewvl(Chipnum):
+    '''Returns which wavelengths are measured at pulse measurements'''
+    return np.unique([int(i.split('\\')[-1][:-2])
+                      for i in glob.iglob(
+                          get_datafld() + f'{Chipnum}\\Pulse\\*nm')])
+
+
+def get_pulseKIDs(Chipnum, wvl):
     '''Returns which KIDs are measured at pulse measurements'''
     return np.unique([int(i.split('\\')[-1].split('_')[0][3:])
-                     for i in glob.glob(get_datafld() + f'{Chipnum}\\*mK\\*.mat')])
+                     for i in glob.iglob(get_datafld() +
+                                         f'{Chipnum}\\Pulse\\{wvl}nm\\*.csv')])
 
 
-def get_pulsePread(Chipnum, KIDnum):
+def get_pulsePread(Chipnum, KIDnum, wvl):
     '''Returns which read powers are measured at pulse measurements'''
     return np.unique([int(i.split('\\')[-1].split('_')[1][:-3])
-                      for i in glob.glob(
-                          get_datafld() + f'{Chipnum}\\*mK\\KID{KIDnum}*.mat')])
+                      for i in glob.iglob(
+                          get_datafld() +
+                          f'{Chipnum}\\Pulse\\{wvl}nm\\KID{KIDnum}*.csv')])
 
 
-def get_pulseTemp(Chipnum, KIDnum, Pread):
+def get_pulseTemp(Chipnum, KIDnum, Pread, wvl):
     '''Returns which temperatures are measured at pulse measurements'''
-    return np.unique([int(i.split('\\')[-2][:-2])
-                      for i in glob.glob(
-                          get_datafld() + f'{Chipnum}\\*mK\\KID{KIDnum}_{Pread}dBm*.mat')])
+    return np.unique([int(i.split('\\')[-1].split('_')[3][3:])
+                      for i in glob.iglob(
+                          get_datafld() +
+                          f'{Chipnum}\\Pulse\\{wvl}nm\\KID{KIDnum}_{Pread}dBm*.csv')])
 
 
-def get_pulsewvl(Chipnum, KIDnum, Pread, Temp):
-    '''Returns which wavelengths are measured at pulse measurements'''
-    return np.unique([int(i.split('\\')[-1].split('_')[2])
-                      for i in glob.glob(
-                          get_datafld() + f'{Chipnum}\\{Temp}mK\\KID{KIDnum}_{Pread}dBm*.mat')])
+
+
+
+# OLD PULSE ANALYSIS DATA:
 
 
 def get_pulsedata(Chipnum, KIDnum, Pread, Tbath, wvlngth, points=3000):
@@ -179,6 +239,7 @@ def get_pulsedata(Chipnum, KIDnum, Pread, Tbath, wvlngth, points=3000):
     peakdata_ph = peakdata["pulsemodelfo"][0]
     peakdata_amp = peakdata["pulsemodelfo_amp"][0]
     return peakdata_ph, peakdata_amp
+
 
 # GR Noise
 
