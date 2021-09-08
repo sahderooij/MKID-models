@@ -145,14 +145,26 @@ def get_avlbins(folder):
     return bindf.values
 
 
-def get_avgpulse(Chipnum, KID, Pread, T, wvl, std=False):
+def get_bin(folder, KID, Pread, T, strm):
+    if type(strm) != str:
+        return np.fromfile(
+            folder + f"\\KID{KID}_{Pread}dBm__TDvis{int(strm)}_TmK{T}.bin",
+            dtype=">f8").reshape(-1, 2)
+    else:
+        return np.fromfile(
+            folder + f"\\KID{KID}_{Pread}dBm__TD{strm}_TmK{T}.bin",
+            dtype=">f8").reshape(-1, 2)
+
+
+def get_avgpulse(Chipnum, KID, Pread, T, wvl, subfolder='', std=False):
     '''Returns the phase and amplitude data (in that order)
     of the average pulse, calculated from kidata.pulse.calc_avgpulse.
-    if std is True, the standard deviation is returned, instead of
+    Note: the baseline is subtracted from amplitude.
+    If std is True, the standard deviation is returned, instead of
     the average.'''
     data = np.genfromtxt(
         get_datafld() +
-        f'{Chipnum}\\Pulse\\{wvl}nm\\KID{KID}_{Pread}dBm__TmK{T}_avgpulse.csv',
+        f'{Chipnum}\\Pulse\\{wvl}nm\\{subfolder}KID{KID}_{Pread}dBm__TmK{T}_avgpulse.csv',
         delimiter=',', skip_header=1)
     ind = 0
     if std:
@@ -170,21 +182,6 @@ def get_avgpulseinfo(Chipnum, KID, Pread, T, wvl):
     return strms.astype(int), locs.astype(int), proms
 
 
-def get_pulsebin(Chipnum, KID, Pread, T, wvl, strm):
-    if type(strm) != str:
-        return np.fromfile(
-            get_datafld() +
-            (f"{Chipnum}\\Pulse\\{wvl}nm\\TD_2D\\KID{KID}_{Pread}dBm"
-             f"__TDvis{int(strm)}_TmK{T}.bin"),
-            dtype=">f8").reshape(-1, 2)
-    else:
-        return np.fromfile(
-            get_datafld() +
-            (f"{Chipnum}\\Pulse\\{wvl}nm\\TD_2D\\KID{KID}_{Pread}dBm"
-             f"__TD{strm}_TmK{T}.bin"),
-            dtype=">f8").reshape(-1, 2)
-
-
 def get_pulsewvl(Chipnum):
     '''Returns which wavelengths are measured at pulse measurements'''
     return np.unique([int(i.split('\\')[-1][:-2])
@@ -192,27 +189,27 @@ def get_pulsewvl(Chipnum):
                           get_datafld() + f'{Chipnum}\\Pulse\\*nm')])
 
 
-def get_pulseKIDs(Chipnum, wvl):
+def get_pulseKIDs(Chipnum, wvl, subfolder=''):
     '''Returns which KIDs are measured at pulse measurements'''
     return np.unique([int(i.split('\\')[-1].split('_')[0][3:])
                      for i in glob.iglob(get_datafld() +
-                                         f'{Chipnum}\\Pulse\\{wvl}nm\\*.csv')])
+                                         f'{Chipnum}\\Pulse\\{wvl}nm\\{subfolder}*.csv')])
 
 
-def get_pulsePread(Chipnum, KIDnum, wvl):
+def get_pulsePread(Chipnum, KIDnum, wvl, subfolder=''):
     '''Returns which read powers are measured at pulse measurements'''
     return np.unique([int(i.split('\\')[-1].split('_')[1][:-3])
                       for i in glob.iglob(
                           get_datafld() +
-                          f'{Chipnum}\\Pulse\\{wvl}nm\\KID{KIDnum}*.csv')])
+                          f'{Chipnum}\\Pulse\\{wvl}nm\\{subfolder}KID{KIDnum}*.csv')])
 
 
-def get_pulseTemp(Chipnum, KIDnum, Pread, wvl):
+def get_pulseTemp(Chipnum, KIDnum, Pread, wvl, subfolder=''):
     '''Returns which temperatures are measured at pulse measurements'''
     return np.unique([int(i.split('\\')[-1].split('_')[3][3:])
                       for i in glob.iglob(
                           get_datafld() +
-                          f'{Chipnum}\\Pulse\\{wvl}nm\\KID{KIDnum}_{Pread}dBm*.csv')])
+                          f'{Chipnum}\\Pulse\\{wvl}nm\\{subfolder}KID{KIDnum}_{Pread}dBm*.csv')])
 
 
 

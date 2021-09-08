@@ -7,28 +7,26 @@ from ipywidgets import interact
 import glob
 from tqdm.notebook import tnrange
 import warnings
-
+from scipy.signal import savgol_filter
 
 from kidata.IQ import to_ampphase
 from kidata import io
 
 
 def calc_pulseavg(
-    Chipnum, wvl, KIDPrT=None, 
-    pulse_len=2e3, start=500, minmax_proms=None, kid_property="substrate",
+    filelocation, KIDPrT=None, save_location=None,
+    pulse_len=2000, start=500, minmax_proms=None, kid_property="substrate",
 ):
     """Script that runs a temp sweep of a certain data set and saves it.
-    Chipnum, wvl: to find the folder that contains .bin files.
+    filelocation: the folder that contains .bin files.
     KIDPrT: array that has KID, Pread and T in columns of the files that 
         need to be processed. Default is all .bin files in folder.
-    pulse_len: amount of points that will be taken from each pulse
+    pulse_len: (int) amount of points that will be taken from each pulse
     start: desired amount of noise points before the pulse
     minmax_prom: prominence spread of the desired peaks 
         (run selected_proms to determine these, asks if not given)
     KID_property: {'substrate','membrane'}, if membrane, it filters pulses
         where the pre-pulse noise is too high. """
-
-    filelocation = io.get_datafld() + f'{Chipnum}\\Pulse\\{wvl}nm\\TD_2D'
 
     if KIDPrT is None:
         KIDPrT = io.get_avlbins(filelocation)
@@ -43,10 +41,11 @@ def calc_pulseavg(
         ]
     ).max()
 
-    save_location = "\\".join(glob.glob(filelocation)[0].split("\\")[:-1])
+    if save_location is None:
+        save_location = "\\".join(glob.glob(filelocation)[0].split("\\")[:-1])
 
     if minmax_proms is None:
-        minmax_proms = select_proms(Chipnum, wvl, KIDPrT, pulse_len)
+        minmax_proms = select_proms(filelocation, KIDPrT, pulse_len)
 
     KIDs = np.unique(KIDPrT[:, 0])
     for i in tnrange(len(KIDs), desc='KID', leave=False):
@@ -71,7 +70,7 @@ def calc_pulseavg(
                 # and select the pulses which are going to be used
 
                 for n in tnrange(n_streams, desc='stream', leave=False):
-                    data = io.get_pulsebin(Chipnum, KID, Pread, temp, wvl, n)
+                    data = io.get_bin(filelocation, KID, Pread, temp, n)
                     data_info = (f"{filelocation}/KID{KID}_{Pread}dBm"
                                  f"__TDvis{n}_TmK{temp}_info.dat")
                     tres = calctres(data_info)
@@ -113,8 +112,8 @@ def calc_pulseavg(
                     std_amp = np.std(all_pulses_amp, 0)
                 else:
                     warnings.warn(
-                        (f"{temp} mK: No pulses made it through filtering,"
-                         "please check filters"))
+                        (f"KID{KID}, {temp} mK, {Pread} dBm: No pulses made it"
+                         "through filtering, please check filters"))
                     avg_pulse_phase = [0]
                     std_phase = [0]
                     avg_pulse_amp = [0]
@@ -152,10 +151,10 @@ def calc_pulseavg(
                 )
 
 
-def select_proms(Chipnum, wvl, KIDPrT=None, pulse_len=2e3, nstream=5):
+def select_proms(filelocation, KIDPrT=None, pulse_len=2e3, nstream=5):
     # Shows you nstream timestreams and a hist of the peaks and
     # then asks you to select the wanted prominences
-    filelocation = io.get_datafld() + f'{Chipnum}\\Pulse\\{wvl}nm\\TD_2D'
+
     if KIDPrT is None:
         KIDPrT = io.get_avlbins(filelocation)
     minmax_proms = {}
@@ -171,20 +170,20 @@ def select_proms(Chipnum, wvl, KIDPrT=None, pulse_len=2e3, nstream=5):
                 plt.clf()
                 total_prominences = np.empty(0)
                 for j in range(nstream):
-                    data = io.get_pulsebin(Chipnum, KID, Pread, temp, wvl, j)
+                    data = io.get_bin(filelocation, KID, Pread, temp, j)
                     amp, phase = to_ampphase(data)
                     std = np.std(phase)
                     multiplier = 4
                     peaks, peakshight = find_peaks(
                         phase, prominence=multiplier * std)
                     prominences = peakshight["prominences"]
-                    while len(peaks) < 5:
+                    while len(peaks) < 100:
                         multiplier -= 1
                         peaks, peakshight = find_peaks(
                             phase, prominence=multiplier * std
                         )
 
-                    while len(peaks) > len(phase)/pulse_len*1e-1:
+                    while len(peaks) > len(phase)/pulse_len*.5:
                         multiplier += 0.2
                         mask = (prominences) > (multiplier * std)
                         peaks = peaks[mask]
@@ -194,7 +193,8 @@ def select_proms(Chipnum, wvl, KIDPrT=None, pulse_len=2e3, nstream=5):
 
                 plt.figure()
                 plt.plot(phase)
-                plt.title(f"Temp: {temp} mK, Pread: {Pread} dBm")
+                plt.plot(peaks, phase[peaks], 'r.')
+                plt.title(f"KID{KID}, {temp} mK, {Pread} dBm")
                 plt.figure()
                 plt.hist(total_prominences, bins=30)
                 plt.title("Histogram of found peaks")
@@ -339,12 +339,12 @@ def calc_offset(peaks, amount, start, locations, data, prominences, kid_property
     deleted = []
     # calc offsets
     for i in range(amount):
-        used_range = peaks[i, 0:start - 50]
+        used_range = peaks[i, 0:start - int(5*tres)]
 
         offsets[i] = np.mean(used_range)
         if kid_property == "membrane":
             mask = used_range < 0
-            if sum(mask) < (0.05 * (start - 50)):
+            if sum(mask) < (0.05 * (start - int(5*tres))):
                 deleted.append(i)
         peaks[i, :] -= offsets[i]
     proms = np.delete(prominences, deleted)
@@ -418,20 +418,34 @@ def calctres(info_loc):
 
 
 def view_pulses(Chipnum, KID, Pread, T, wvl, pulse_len=500, start=100,
-                logscale=True, ):
+                logscale=True, movavg=False, wnd=9, suboff=False):
     strms, locs, proms = io.get_avgpulseinfo(Chipnum, KID, Pread, T, wvl)
     plt.ion()
 
     def show_pulse(pulse):
+        plt.clf()
         strm = strms[pulse]
         loc = locs[pulse]
 
-        data = io.get_pulsebin(Chipnum, KID, Pread, T, wvl, strm)
+        filelocation = io.get_datafld() + f'{Chipnum}\\Pulse\\{wvl}nm\\TD_2D'
+
+        data_info = (f"{filelocation}/KID{KID}_{Pread}dBm"
+                     f"__TDvis{strm}_TmK{T}_info.dat")
+
+        data = io.get_bin(filelocation,
+                          KID, Pread, T, strm)
         amp, phase = to_ampphase(data)
-        plt.plot(phase[int(loc-start):int(loc+pulse_len-start)],
-                 label='phase')
-        plt.plot(1-amp[int(loc-start):int(loc+pulse_len-start)],
-                 label='1-amp')
+        phpulse = phase[int(loc-start):int(loc+pulse_len-start)]
+        amppulse = 1-amp[int(loc-start):int(loc+pulse_len-start)]
+        t = np.arange(len(phpulse)) - start
+        if suboff:
+            phpulse -= np.mean(phpulse[0:start - 5*calctres(data_info)])
+            amppulse -= np.mean(amppulse[0:start - 5*calctres(data_info)])
+        if movavg:
+            phpulse = savgol_filter(phpulse, wnd, 0)
+            amppulse = savgol_filter(amppulse, wnd, 0)
+        plt.plot(t, phpulse, label='phase')
+        plt.plot(t, amppulse, label='1-amp')
         plt.legend()
         if logscale:
             plt.yscale('log')

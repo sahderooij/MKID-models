@@ -169,23 +169,13 @@ def spec(
                         fres = S21data[Tind, 5] / (2 * S21data[Tind, 2])
                         axs[ax1, ax2].annotate(
                             "",
-                            (
-                                fres,
-                                SPR[~np.isnan(SPR)][
-                                    np.abs(fres - freq[~np.isnan(SPR)]).argmin()
-                                ],
-                            ),
-                            (
-                                fres,
-                                SPR[~np.isnan(SPR)][
-                                    np.abs(fres - freq[~np.isnan(SPR)]).argmin()
-                                ]
-                                + 10,
-                            ),
+                            (fres, 1),
+                            (fres, 1.25),
                             arrowprops=dict(
                                 arrowstyle="simple", color=cmap(norm(Temp[i])), ec="k"
                             ),
                             annotation_clip=False,
+                            xycoords=('data', 'axes fraction')
                         )
         axs[0, 0].set_xlim(*xlim)
         axs[0, 0].set_ylim(*ylim)

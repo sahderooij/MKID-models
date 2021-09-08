@@ -2,18 +2,17 @@ import numpy as np
 import warnings
 import matplotlib.pyplot as plt
 
-from scipy import integrate
 import scipy.constants as const
 from scipy.optimize import curve_fit
 from scipy.optimize import minimize_scalar as minisc
 from scipy.special import k0, i0
 from scipy import interpolate
 
-from kidcalc import D, beta, cinduct, hwread, hwres, kbTeff, nqp
+from kidcalc import D, beta, cinduct, nqp
 import kidcalc
 from SC import Al
 
-from kidata import io, filters
+from kidata import io
 from kidata.plot import _selectPread
 
 # NOTE: all units are in 'micro': µeV, µm, µs etc.
@@ -393,7 +392,8 @@ def tau_pulse(
     peak2 = pulse[fitmask]
     try:
         fit = curve_fit(
-            lambda x, a, b: b * np.exp(-x / a), t2, peak2, p0=(tauguess, peak2[0])
+            lambda x, a, b: b * np.exp(-x / a), t2, peak2,
+            p0=(tauguess*1e6/sfreq, peak2[0])
         )
     except RuntimeError:
         fit = [[np.nan, np.nan], np.array([[np.nan, np.nan], [np.nan, np.nan]])]
@@ -427,25 +427,30 @@ def fit_nonexppulse(
         dx/dt = -R x^2  -x/tss, 
     with r/(1-r)=R*xi*tss (Wang2014). 
     First, tss is estimated from the second part of the pulse decay (tsstfit), 
-    after which r is extracted with the full fit window (tfit). Otherwise the fit does not
-    converge. 
-    
+    after which r is extracted with the full fit window (tfit). Both tfit and
+    tsstfit are with respect to the pulsestart.
+    Otherwise the fit does not converge.
+
     Returns:
     tss -- in µs
-    R -- in µs^-1, 
+    R -- in µs^-1
+    xi -- in the same units as pulse
     optionally with error"""
 
+    # first extract the steady state (tail) decay time
     tss, tsserr = (
         np.array(tau_pulse(pulse, pulsestart, sfreq, tsstfit, tssguess, reterr=True))
         * 1e-6
         * sfreq
     )
 
+    # set-up for the fit:
     t = np.arange(len(pulse)) - pulsestart
     fitmask = np.logical_and(t > tfit[0], t < tfit[1])
     t2 = t[fitmask]
     peak2 = pulse[fitmask]
 
+    # now do the fit:
     def fitfun(t, r, xi):
         return xi * (1 - r) / (np.exp(t / tss) - r)
 
@@ -453,12 +458,13 @@ def fit_nonexppulse(
     R = fit[0][0] / (1 - fit[0][0]) / (fit[0][1] * tss)
 
     if plot:
-        plt.figure()
-        plt.plot(t, pulse)
-        plt.plot(t2, fitfun(t2, fit[0][0], fit[0][1]))
+        plt.plot(t, pulse, label='data')
+        plt.plot(t2, fitfun(t2, fit[0][0], fit[0][1]), 'r', label='1/t-fit')
+        plt.plot(t[pulsestart:], fitfun(t[pulsestart:], fit[0][0], fit[0][1]),
+                 'r--')
         plt.yscale("log")
-        plt.show()
-        plt.close()
+        plt.legend()
+
     if reterr:
         return (
             tss * 1e6 / sfreq,
@@ -482,9 +488,47 @@ def fit_nonexppulse(
                 .dot([fit[1][0, 0], tsserr ** 2, fit[1][1, 1]])
                 .sum()
             ),
+            fit[1][1, 1]
         )
     else:
-        return tss * 1e6 / sfreq, R * 1e6 / sfreq
+        return tss * 1e6 / sfreq, R * 1e6 / sfreq, fit[0][1]
+
+
+def double_exp(pulse, pulsestart=500, sfreq=1e6,
+               tfit=None, t1fit=(1, 10), t2fit=(50, 150),
+               reterr=False, tauguess=(10, 100), plot=False):
+    '''Returns first and second decay times, based on a 4 parameter
+    double exponential fit of the form: A1 exp(-t/t1) + A2 exp(-t/t2)'''
+    if tfit is None:
+        tfit = (0, len(pulse) - pulsestart)
+
+    t1, t1err = tau_pulse(pulse, pulsestart, sfreq, t1fit,
+                          tauguess[0]*1e6/sfreq, reterr=True)
+    t2, t2err = tau_pulse(pulse, pulsestart, sfreq, t2fit,
+                          tauguess[1]*1e6/sfreq, reterr=True)
+
+    def fitfun(t, A1, A2):
+        return A1 * np.exp(-t / t1) + A2 * np.exp(-t / t2)
+
+    t = np.arange(len(pulse)) - pulsestart
+    fitmask = np.logical_and(t > tfit[0], t < tfit[1])
+
+    fit = curve_fit(
+        fitfun, t[fitmask], pulse[fitmask],
+        p0=(pulse.max(), pulse.max()*1e-2)
+    )
+    if plot:
+        plt.plot(t, pulse, label='data')
+        plt.plot(t[fitmask], fitfun(t[fitmask], *fit[0]), 'r', label='1/t-fit')
+        plt.plot(t[pulsestart:], fitfun(t[pulsestart:], *fit[0]),
+                 'r--')
+        plt.yscale("log")
+        plt.legend()
+
+    if reterr:
+        pass
+    else:
+        return t1*1e6/sfreq, t2*1e6/sfreq, fit[0][0], fit[0][1]
 
 
 def tesc(

@@ -6,6 +6,8 @@ import os
 import numpy as np
 
 # Parent class:
+
+
 class Superconductor(object):
     def __init__(self, name, Tc, TD, N0, rhon, EF, vF, t0, tpb, V, d, tesc):
         self.name = name
@@ -43,7 +45,8 @@ class Superconductor(object):
             return 1 / np.sqrt(E ** 2 - D ** 2)
 
         return 1 / (
-            integrate.quad(integrand1, self.D0, self.kbTD, args=(self.D0,))[0] * self.N0
+            integrate.quad(integrand1, self.D0, self.kbTD,
+                           args=(self.D0,))[0] * self.N0
         )
 
     @property
@@ -81,7 +84,8 @@ class Superconductor(object):
         which uses GR noise lifetimes at high temperatures."""
         import kidata
 
-        tesc, tescerr = kidata.calc.tesc(Chipnum, KIDnum, self, reterr=True, **kwargs)
+        tesc, tescerr = kidata.calc.tesc(
+            Chipnum, KIDnum, self, reterr=True, **kwargs)
         self.tesc = tesc
         self.tescerr = tescerr
 
@@ -103,9 +107,11 @@ class bTa(Superconductor):
         as they vary from device to device. 
         The default escape time is calculated with Kaplan1979 for Ta on Sapphire.
         The hardcoded arguments for the
-        __init__() method, are standard constants for Ta"""
+        __init__() method, are standard constants for Ta from Abadia2019 
+        and Magnuson2019"""
         super().__init__(
-            "bTa", Tc, 266, 3.07e4, rhon, np.nan, np.nan, 1.78e-3, 0.0227e-3, V, d, tesc
+            "bTa", Tc, 266, 3.07e4, rhon, np.nan, np.nan, 1.78e-3, 0.0227e-3,
+            V, d, tesc
         )
 
 
@@ -115,17 +121,20 @@ class aTa(Superconductor):
         as they vary from device to device. 
         The default escape time is calculated with Kaplan1979 for Ta on Sapphire.
         The hardcoded arguments for the
-        __init__() method, are standard constants for Ta"""
+        __init__() method, are standard constants for Ta from Abadia2019 
+        and Magnuson2019"""
         super().__init__(
-            "aTa", Tc, 250, 5.70e4, rhon, 9.5e6, 0.24e6, 1.78e-3, 0.0227e-3, V, d, tesc
+            "aTa", Tc, 250, 5.70e4, rhon, 9.5e6, 0.24e6, 1.78e-3, 0.0227e-3,
+            V, d, tesc
         )
 
 
 class TiN(Superconductor):
     def __init__(self, Tc=2.7, rhon=253, V=1e3, d=0.022, tesc=0):
-        """The default values should be adjested per device and are now set 
+        """The default values should be adjested per device and are now set
         as mentioned in Coumou2013 and Kardakova2015, film C.
-        The Debye temperature is for T = 300 K, https://doi.org/10.1016/S1006-7191(08)60082-4"""
+        The Debye temperature is for T = 300 K,
+        https://doi.org/10.1016/S1006-7191(08)60082-4"""
         super().__init__(
             "TiN", Tc, 579.2, 6.17e4, rhon, 0, 0, 23e-3 * 4.2, 0, V, d, tesc
         )
@@ -133,10 +142,11 @@ class TiN(Superconductor):
 
 ###################################################################################
 def init_SC(Chipnum, KIDnum, SC_class=Al, set_tesc=True, **tesckwargs):
-    """This function returns an SC instance (which is defined with the SC_class argument), 
-    with the parameters initialized from data. 
-    Tc, V, and thickness d are from the S21 measurement, and tesc is set with the 
-    set_tesc method which uses kidata.calc.tesc() to estimate the phonon escape time."""
+    """This function returns an SC instance (which is defined with the SC_class
+    argument), with the parameters initialized from data.
+    Tc, V, and d (thickness) are from the S21 measurement, and tesc is set with
+    the set_tesc method which uses kidata.calc.tesc() to estimate the phonon
+    escape time."""
     import kidata
 
     S21data = kidata.io.get_S21data(Chipnum, KIDnum)
