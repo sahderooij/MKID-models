@@ -8,7 +8,8 @@ import glob
 
 
 def to_ampphase(data):
-    """Converts the I and Q variables from the raw .dat file to (normalized) amplitude and phase.
+    """Converts the I and Q variables from the raw .dat file to (normalized)
+    amplitude and phase.
     Takes:
     data loaded by np.fromfile(path,dtype='>f8').reshape(-1,2)
 
@@ -22,7 +23,8 @@ def to_ampphase(data):
 
 
 def subtr_offset(data, plot=False):
-    """Subtracts a quadratic offset from a time stream (data) to compensate temperature drifts.
+    """Subtracts a quadratic offset from a time stream (data) to compensate
+    temperature drifts.
     Optionally plots the quadratic fit."""
     t = np.arange(len(data))
     p = np.polyfit(
@@ -38,7 +40,8 @@ def subtr_offset(data, plot=False):
 
 
 def smooth(data, tau, sfreq):
-    """Smooths a time stream with half of the lifetime (tau) via a moving average.
+    """Smooths a time stream with half of the lifetime (tau) via a
+    moving average.
     Takes:
     data -- time stream data
     tau -- lifetime of pulses in seconds
@@ -52,7 +55,7 @@ def smooth(data, tau, sfreq):
 def view_bins(path):
     """A functions that plots the amplitude and phase from IQ data streams that
     are found in the folder indicated by path. Needs matplotlib widget
-    functionalities."""
+    back-end."""
     fig, axs = plt.subplots(2, 1, figsize=(5, 5), sharex=True)
     plt.subplots_adjust(wspace=0, hspace=0)
     plt.ion()
@@ -66,7 +69,7 @@ def view_bins(path):
         axs[1].set_ylabel("Phase (rad.)")
         axs[0].set_ylabel("Amp. (normalized)")
         axs[0].plot(amp, color="orange")
-        axs[1].set_xlabel("time (us)")
+        axs[1].set_xlabel("time (µs)")
 
     interact(
         plotbin, file=np.sort([i.split("\\")[-1]

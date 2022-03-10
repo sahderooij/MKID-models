@@ -54,7 +54,7 @@ def spec(
     pltPread="all",
     spec="all",
     lvlcomp="",
-    SC=None,
+    SCvol=None,
     SCkwargs={},
     clbar=True,
     cmap=None,
@@ -92,12 +92,11 @@ def spec(
 
     for KIDnum in KIDlist:
         if lvlcomp != "":
-            if SC is None:
-                SC_inst = SuperCond.init_SC(Chipnum, KIDnum, **SCkwargs)
-            else:
-                SC_inst = SC
+            if SCvol is None:
+                SCvol = SuperCond.init_SC(Chipnum, KIDnum, **SCkwargs)
         else:
-            SC_inst = SuperCond.Al()
+            SCvol = SuperCond.Vol(SuperCond.Al(), np.nan, np.nan)
+            
         Preadar = _selectPread(pltPread, io.get_grPread(TDparam, KIDnum))
         if ax12 is None:
             fig, axs = plt.subplots(
@@ -134,7 +133,7 @@ def spec(
             for i in range(len(Temp)):
                 for (ax2, spec) in zip(range(len(specs)), specs):
                     lvlcompspl = calc.NLcomp(
-                        Chipnum, KIDnum, Pread, SC=SC_inst, method=lvlcomp, var=spec
+                        Chipnum, KIDnum, Pread, SCvol=SCvol, method=lvlcomp, var=spec
                     )
                     freq, SPR = io.get_grdata(
                         TDparam, KIDnum, Pread, Temp[i], spec=spec
@@ -197,11 +196,11 @@ def ltnlvl(
     del1fNoise=False,
     del1fnNoise=False,
     suboffres=False,
-    relerrthrs=0.2,
+    relerrthrs=0.1,
     pltKIDsep=True,
     pltthlvl=False,
     pltkaplan=False,
-    pltthmfnl=False,
+    pltthmlvl=False,
     plttres=False,
     plttscat=False,
     fig=None,
@@ -210,7 +209,7 @@ def ltnlvl(
     pltclrbar=True,
     fmt="-o",
     label=None,
-    SC=None,
+    SCvol=None,
     SCkwargs={},
     showfit=False,
     savefig=False,
@@ -321,27 +320,25 @@ def ltnlvl(
             elif color == "Pint":
                 cmap, norm = _get_cmap(Pintar=np.array(Pintdict[KIDnum]))
 
-        if lvlcomp != "" or pltkaplan or pltthmfnl or pltthlvl or pltTTc:
-            if SC is None:
-                SC_inst = SuperCond.init_SC(Chipnum, KIDnum, **SCkwargs)
-            else:
-                SC_inst = SC
+        if lvlcomp != "" or pltkaplan or pltthmlvl or pltthlvl or pltTTc:
+            if SCvol is None:
+                SCvol = SuperCond.init_SC(Chipnum, KIDnum, **SCkwargs)
         else:
-            SC_inst = SuperCond.Al()
+            SCvol = SuperCond.Vol(SuperCond.Al(), np.nan, np.nan)
 
         for Pread in Preadar:
             Temp = np.trim_zeros(io.get_grTemp(TDparam, KIDnum, Pread))
             lvlcompspl = calc.NLcomp(
-                Chipnum, KIDnum, Pread, SC=SC_inst, method=lvlcomp, var=spec
+                Chipnum, KIDnum, Pread, SCvol=SCvol, method=lvlcomp, var=spec
             )
 
             if suboffres:
                 Temp = np.intersect1d(Temp, io.get_grTemp(TDparamoffres, KIDnum, Pread))
 
-            if Tminmax != None:
-                if Tminmax[0] != None:
+            if Tminmax is not None:
+                if Tminmax[0] is not None:
                     Temp = Temp[Temp > Tminmax[0]]
-                if Tminmax[1] != None:
+                if Tminmax[1] is not None:
                     Temp = Temp[Temp < Tminmax[1]]
             taut = np.zeros((len(Temp)))
             tauterr = np.zeros((len(Temp)))
@@ -378,8 +375,10 @@ def ltnlvl(
                 if showfit:
                     print(tauterr[i] / taut[i])
 
-                lvl[i] = lvl[i] / interpolate.splev(Temp[i] * 1e-3, lvlcompspl)
-                lvlerr[i] = lvlerr[i] / interpolate.splev(Temp[i] * 1e-3, lvlcompspl)
+                lvl[i] = lvl[i] / interpolate.splev(
+                    Temp[i] * 1e-3, lvlcompspl)
+                lvlerr[i] = lvlerr[i] / interpolate.splev(
+                    Temp[i] * 1e-3, lvlcompspl)
 
             # Deleting bad fits and plotting:
             mask = ~np.isnan(taut)
@@ -397,7 +396,7 @@ def ltnlvl(
                 clr = color
 
             if pltTTc:
-                Temp = Temp / (SC_inst.kbTc / (const.Boltzmann / const.e * 1e6) * 1e3)
+                Temp = Temp / (SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6) * 1e3)
 
             axs[0].errorbar(
                 Temp[mask],
@@ -420,14 +419,14 @@ def ltnlvl(
                 label=label if Pread == Preadar[-1] else "",
             )
             if pltthlvl:
-                if Tminmax is not None:
+                if Tminmax is not None and not pltTTc:
                     Tstartstop = Tminmax
                 else:
                     Tstartstop = (Temp[mask].min(), Temp[mask].max())
                 Ttemp = np.linspace(*Tstartstop, 100)
                 if pltTTc:
                     Ttemp = Ttemp * (
-                        SC_inst.kbTc / (const.Boltzmann / const.e * 1e6) * 1e3
+                        SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6) * 1e3
                     )
                 explvl = (
                     interpolate.splev(
@@ -437,19 +436,19 @@ def ltnlvl(
                 )
                 explvl *= (
                     4
-                    * SC_inst.t0
+                    * SCvol.SC.t0
                     * 1e-6
-                    * SC_inst.V
-                    * SC_inst.N0
-                    * (SC_inst.kbTc) ** 3
-                    / (2 * (SC_inst.D0) ** 2)
-                    * (1 + SC_inst.tesc / SC_inst.tpb)
+                    * SCvol.V
+                    * SCvol.SC.N0
+                    * (SCvol.SC.kbTc) ** 3
+                    / (2 * (SCvol.SC.D0) ** 2)
+                    * (1 + SCvol.tesc / SCvol.SC.tpb)
                     / 2
                 )
                 explvl /= interpolate.splev(Ttemp * 1e-3, lvlcompspl)
                 if pltTTc:
                     Ttemp = Ttemp / (
-                        SC_inst.kbTc / (const.Boltzmann / const.e * 1e6) * 1e3
+                        SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6) * 1e3
                     )
                 (thlvlplot,) = axs[1].plot(
                     Ttemp,
@@ -461,19 +460,19 @@ def ltnlvl(
                 axs[1].legend((thlvlplot,), (r"Expected noise level",))
 
             if pltkaplan and Temp[mask].size != 0:
-                if Tminmax is not None:
+                if Tminmax is not None and not pltTTc:
                     Tstartstop = Tminmax
                 else:
                     Tstartstop = (Temp[mask].min(), Temp[mask].max())
                 T = np.linspace(*Tstartstop, 100)
 
                 if pltTTc:
-                    T = T * (SC_inst.kbTc / (const.Boltzmann / const.e * 1e6))
+                    T = T * (SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6))
                 else:
                     T = T * 1e-3
-                taukaplan = kidcalc.tau_kaplan(T, SC_inst)
+                taukaplan = kidcalc.tau_kaplan(T, SCvol)
                 if pltTTc:
-                    T = T / (SC_inst.kbTc / (const.Boltzmann / const.e * 1e6))
+                    T = T / (SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6))
                 else:
                     T = T * 1e3
 
@@ -494,17 +493,17 @@ def ltnlvl(
                 T = np.linspace(*Tstartstop, 100)
 
                 if pltTTc:
-                    T = T * (SC_inst.kbTc / (const.Boltzmann / const.e * 1e6))
+                    T = T * (SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6))
                 else:
                     T = T * 1e-3
-                tscat = SC_inst.t0 / (
+                tscat = SCvol.SC.t0 / (
                     2.277
-                    * (SC_inst.kbTc / (2 * SC_inst.D0)) ** 0.5
-                    * (T / (SC_inst.kbTc / (const.Boltzmann / const.e * 1e6)))
+                    * (SCvol.SC.kbTc / (2 * SCvol.SC.D0)) ** 0.5
+                    * (T / (SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6)))
                     ** (7 / 2)
                 )
                 if pltTTc:
-                    T = T / (SC_inst.kbTc / (const.Boltzmann / const.e * 1e6))
+                    T = T / (SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6))
                 else:
                     T = T * 1e3
                 axs[0].plot(
@@ -516,20 +515,20 @@ def ltnlvl(
                     label="Kaplan, $\\tau_s$",
                 )
 
-            if pltthmfnl:
+            if pltthmlvl:
                 try:
                     if pltTTc:
                         Temp = Temp * (
-                            SC_inst.kbTc / (const.Boltzmann / const.e * 1e6) * 1e3
+                            SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6) * 1e3
                         )
                     tauspl = interpolate.splrep(Temp[mask], taut[mask], s=0)
                     T = np.linspace(Temp[mask].min(), Temp[mask].max(), 100)
                     Nqp = np.zeros(len(T))
                     for i in range(len(T)):
-                        Nqp[i] = SC_inst.V * kidcalc.nqp(
+                        Nqp[i] = SCvol.V * kidcalc.nqp(
                             T[i] * 1e-3 * const.Boltzmann / const.e * 1e6,
-                            SC_inst.D0,
-                            SC_inst,
+                            SCvol.D0,
+                            SCvol.SC,
                         )
                     thmfnl = (
                         4
@@ -543,7 +542,7 @@ def ltnlvl(
                     )
                     thmfnl /= interpolate.splev(T * 1e-3, lvlcompspl)
                     if pltTTc:
-                        T = T / (SC_inst.kbTc / (const.Boltzmann / const.e * 1e6) * 1e3)
+                        T = T / (SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6) * 1e3)
                     (thmfnlplot,) = axs[1].plot(
                         T,
                         10 * np.log10(thmfnl),
@@ -607,13 +606,13 @@ def Nqp(
     delampNoise=False,
     del1fNoise=False,
     del1fnNoise=False,
-    Tmax=500,
+    Tminmax=None,
     relerrthrs=0.3,
     pltThrm=True,
     pltNqpQi=False,
     splitT=0,
     pltNqptau=False,
-    SC=None,
+    SCvol=None,
     SCkwargs={},
     nqpaxis=True,
     fig=None,
@@ -632,7 +631,7 @@ def Nqp(
     nqpaxis -- also shows density on right axis."""
 
     TDparam = io.get_grTDparam(Chipnum)
-    if ax is None or fig is None:
+    if ax is None:
         fig, ax = plt.subplots()
 
     Preadar = _selectPread(pltPread, io.get_grPread(TDparam, KIDnum))
@@ -642,17 +641,20 @@ def Nqp(
         norm = matplotlib.colors.Normalize(-1.05 * Preadar.max(), -0.95 * Preadar.min())
         clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax)
         clb.ax.set_title(r"$P_{read}$ (dBm)")
-    if SC is None:
-        SC_inst = SuperCond.init_SC(Chipnum, KIDnum, set_tesc=pltNqptau, **SCkwargs)
-    else:
-        SC_inst = SC
+    if SCvol is None:
+        SCvol = SuperCond.init_SC(Chipnum, KIDnum, set_tesc=pltNqptau, **SCkwargs)
+
     for Pread in Preadar:
         S21data = io.get_S21data(Chipnum, KIDnum, Pread)
 
         Respspl = calc.Respspl(Chipnum, KIDnum, Pread, var=spec)
 
         Temp = io.get_grTemp(TDparam, KIDnum, Pread)
-        Temp = Temp[Temp < Tmax]
+        if Tminmax is not None:
+            if Tminmax[0] is not None:
+                Temp = Temp[Temp > Tminmax[0]]
+            if Tminmax[1] is not None:
+                Temp = Temp[Temp < Tminmax[1]]
         Nqp, Nqperr, taut = np.zeros((3, len(Temp)))
         for i in range(len(Temp)):
             freq, SPR = io.get_grdata(TDparam, KIDnum, Pread, Temp[i], spec=spec)
@@ -674,12 +676,13 @@ def Nqp(
             )
         mask = ~np.isnan(Nqp)
         mask[mask] = Nqperr[mask] / Nqp[mask] <= relerrthrs
-        if Preadar.size > 1:
-            color = cmap(norm(-1 * Pread))
-        elif pltPread == "min":
-            color = "purple"
-        elif pltPread == "max":
-            color = "gold"
+        if color is None:
+            if Preadar.size > 1:
+                color = cmap(norm(-1 * Pread))
+            elif pltPread == "min":
+                color = "purple"
+            elif pltPread == "max":
+                color = "gold"
 
         dataline = ax.errorbar(
             Temp[mask],
@@ -692,7 +695,7 @@ def Nqp(
             label=label,
         )
         if pltNqptau:
-            Nqp_ = SC_inst.V * kidcalc.nqpfromtau(taut, SC_inst)
+            Nqp_ = SCvol.V * kidcalc.nqpfromtau(taut, SCvol)
             (tauline,) = ax.plot(
                 Temp[mask],
                 Nqp_[mask],
@@ -704,7 +707,7 @@ def Nqp(
         Preadar = io.get_S21Pread(Chipnum, KIDnum)
         for Pread in Preadar:
             S21data = io.get_S21data(Chipnum, KIDnum, Pread)
-            T, Nqp = calc.NqpfromQi(S21data)
+            T, Nqp = calc.NqpfromQi(S21data, SC=SCvol.SC)
             mask = np.logical_and(
                 T * 1e3 > ax.get_xlim()[0], T * 1e3 < ax.get_xlim()[1]
             )
@@ -733,9 +736,9 @@ def Nqp(
         T = np.linspace(*ax.get_xlim(), 100)
         NqpT = np.zeros(100)
         for i in range(len(T)):
-            D_ = kidcalc.D(const.Boltzmann / const.e * 1e6 * T[i] * 1e-3, SC_inst)
-            NqpT[i] = SC_inst.V * kidcalc.nqp(
-                const.Boltzmann / const.e * 1e6 * T[i] * 1e-3, D_, SC_inst
+            D_ = kidcalc.D(const.Boltzmann / const.e * 1e6 * T[i] * 1e-3, SCvol.SC)
+            NqpT[i] = SCvol.V * kidcalc.nqp(
+                const.Boltzmann / const.e * 1e6 * T[i] * 1e-3, D_, SCvol.SC
             )
         (Thline,) = ax.plot(
             T, NqpT, color="k", zorder=len(ax.lines) + 1, label="Thermal $N_{qp}$"
@@ -753,10 +756,10 @@ def Nqp(
     if nqpaxis:
 
         def nqptoNqp(x):
-            return x * SC_inst.V
+            return x * SCvol.V
 
         def Nqptonqp(x):
-            return x / SC_inst.V
+            return x / SCvol.V
 
         ax2 = ax.secondary_yaxis("right", functions=(Nqptonqp, nqptoNqp))
         ax2.set_ylabel("$n_{qp}$ ($\\mu m^{-3}$)")

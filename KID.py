@@ -29,18 +29,21 @@ class KID(object):
         kbT0=0.2 * 86.17,
         kbT=0.2 * 86.17,
         ak=0.0268,
-        SC=SC.Al(),
+        SCvol=SC.Vol(SC.Al(), .05, 15.),
     ):
         """Attributes are defined here. hw0 and kbT0 give the resonance frequency
         at temperature T0, both in µeV, from which we linearize to calculate the 
         new resonance frequencies."""
-        self.SC = SC
+        self.SC = SCvol.SC
+        self.d = SCvol.d
+        self.V = SCvol.V
+        self.tesc = SCvol.tesc
         self.Qc = Qc  # -
         self.hw0 = hw0  # µeV
         self.kbT0 = kbT0  # µeV
         self.kbT = kbT  # µeV
         self.ak = ak  # -
-        self.epb = 0.6 - 0.4 * np.exp(-self.SC.tesc / self.SC.tpb)  # arbitary,
+        self.epb = 0.6 - 0.4 * np.exp(-self.tesc / self.SC.tpb)  # arbitary,
         # see Guruswamy2014 for more details on pair-breaking efficiency
 
     # Calculated attributes
@@ -57,7 +60,7 @@ class KID(object):
 
     @property
     def Nqp_0(self):
-        return self.SC.V * kidcalc.nqp(self.kbT, self.D_0, self.SC)
+        return self.V * kidcalc.nqp(self.kbT, self.D_0, self.SC)
 
     @property
     def tqp_0(self):
@@ -71,13 +74,14 @@ class KID(object):
 
     @property
     def tqp_1(self):
-        return self.tqp_0 * (1 + self.SC.tesc / self.SC.tpb) / 2
+        return self.tqp_0 * (1 + self.tesc / self.SC.tpb) / 2
 
     @property
     def Qi_0(self):
         hwread = self.hwread
         s_0 = kidcalc.cinduct(hwread, self.D_0, self.kbT)
-        return kidcalc.Qi(s_0[0], s_0[1], self.ak, self.kbT, self.D_0, self.SC)
+        return kidcalc.Qi(s_0[0], s_0[1], self.ak, self.kbT, self.D_0,
+                         SC.Sheet(self.SC, self.d))
 
     @property
     def Q_0(self):
@@ -121,7 +125,7 @@ class KID(object):
         generation term eta*P/D. """
         R, V, G_B, G_es, N_w0 = self.calc_params()
         Nqp0 = np.sqrt(V * ((1 + G_B / G_es) * eta * P / self.D_0 + 2 * G_B * N_w0) / R)
-        self.kbT = kidcalc.kbTeff(Nqp0, self.SC)
+        self.kbT = kidcalc.kbTeff(Nqp0 / self.V, self.SC)
 
     # Calculation functions
     def rateeq(self, N, t, params):
@@ -140,7 +144,7 @@ class KID(object):
             2 * self.SC.D0 * 2 * self.SC.N0 * self.SC.t0
         )  # µs^-1*um^3 (From Wilson2004 or 2.29)
         G_B = 1 / self.SC.tpb  # µs^-1 (From chap8)
-        G_es = 1 / self.SC.tesc  # µs^-1 (From chap8)
+        G_es = 1 / self.tesc  # µs^-1 (From chap8)
         N_w0 = R * self.Nqp_0 ** 2 * self.SC.tpb / (2 * self.SC.V)  # arb.
         return [R, self.SC.V, G_B, G_es, N_w0]
 
@@ -174,13 +178,15 @@ class KID(object):
         return dNqpt + self.Nqp_0
 
     def calc_S21(self, Nqp, hwread, s20, dhw=0):
-        kbTeff = kidcalc.kbTeff(Nqp, self.SC)
+        kbTeff = kidcalc.kbTeff(Nqp / self.V, self.SC)
         D = kidcalc.D(kbTeff, self.SC)
 
         s1, s2 = kidcalc.cinduct(hwread + dhw, D, kbTeff)
 
-        Qi = kidcalc.Qi(s1, s2, self.ak, kbTeff, D, self.SC)
-        hwres = kidcalc.hwres(s2, self.hw0, s20, self.ak, kbTeff, D, self.SC)
+        Qi = kidcalc.Qi(s1, s2, self.ak, kbTeff, D,
+                       SC.Sheet(self.SC, self.d))
+        hwres = kidcalc.hwres(s2, self.hw0, s20, self.ak, kbTeff, D,
+                              SC.Sheet(self.SC, self.d))
         return kidcalc.S21(Qi, self.Qc, hwread, dhw, hwres)
 
     def calc_resp(self, Nqp, hwread, s20, D_0, dhw=0):
@@ -188,7 +194,8 @@ class KID(object):
         S21 = self.calc_S21(Nqp, hwread, s20, dhw)
         # Define circle at this temperature:
         s_0 = kidcalc.cinduct(hwread, D_0, self.kbT)
-        Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak, self.kbT, D_0, self.SC)
+        Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak, self.kbT, D_0,
+                         SC.Sheet(self.SC, self.d))
         S21min = self.Qc / (self.Qc + Qi_0)  # Q/Qi
         xc = (1 + S21min) / 2
         # translate S21 into this circle:
@@ -198,11 +205,12 @@ class KID(object):
 
     def calc_linresp(self, Nqp, hwread, D_0):
         s_0 = kidcalc.cinduct(hwread, D_0, self.kbT)
-        Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak, self.kbT, D_0, self.SC)
+        Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak, self.kbT, D_0,
+                         SC.Sheet(self.SC, self.d))
         Q = Qi_0 * self.Qc / (Qi_0 + self.Qc)
-        beta = kidcalc.beta(self.kbT, D_0, self.SC)
+        beta = kidcalc.beta(self.kbT, D_0, SC.Sheet(self.SC, self.d))
 
-        kbTeff = kidcalc.kbTeff(Nqp, self.SC)
+        kbTeff = kidcalc.kbTeff(Nqp / self.V, self.SC)
         D = kidcalc.D(kbTeff, self.SC)
         s1, s2 = kidcalc.cinduct(hwread, D, kbTeff)
 
@@ -293,7 +301,8 @@ class KID(object):
         s20 = self.s20
 
         s_0 = kidcalc.cinduct(hwread, D_0, self.kbT)
-        Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak, self.kbT, D_0, self.SC)
+        Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak, self.kbT, D_0,
+                          SC.Sheet(self.SC, self.d))
         Q = Qi_0 * self.Qc / (Qi_0 + self.Qc)
         S21min = self.Qc / (self.Qc + Qi_0)  # Q/Qi
         xc = (1 + S21min) / 2
@@ -476,14 +485,15 @@ class S21KID(KID):
         return interpolate.splev(self.kbT, self.Qispl, ext=3)
 
     def calc_S21(self, Nqp, hwread, s20, dhw=0):
-        kbTeff = kidcalc.kbTeff(Nqp, self.SC)
+        kbTeff = kidcalc.kbTeff(Nqp / self.V, self.SC)
         D = kidcalc.D(kbTeff, self.SC)
 
         s1, s2 = kidcalc.cinduct(hwread + dhw, D, kbTeff)
 
         Qi = interpolate.splev(kbTeff, self.Qispl)
 
-        hwres = kidcalc.hwres(s2, self.hw0, s20, self.ak, self.kbT, D, self.SC)
+        hwres = kidcalc.hwres(s2, self.hw0, s20, self.ak, self.kbT, D,
+                              SC.Sheet(self.SC, self.d))
         return kidcalc.S21(Qi, self.Qc, hwread, dhw, hwres)
 
     def calc_resp(self, Nqp, hwread, s20, D_0, dhw=0):

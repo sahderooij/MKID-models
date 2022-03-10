@@ -114,23 +114,23 @@ def nqp(kbT, D, SC):
             return result
 
 
-def kbTeff(Nqp, SC):
+def kbTeff(nqp, SC):
     """Calculates the effective temperature (in µeV) at a certain 
-    number of quasiparticles."""
+   quasiparticle density."""
     Ddata = SC.Ddata
     if Ddata is not None:
         kbTspl = interpolate.splrep(Ddata[2, :], Ddata[0, :])
-        return interpolate.splev(Nqp / SC.V, kbTspl)
+        return interpolate.splev(nqp, kbTspl)
     else:
 
         def minfunc(kbT, Nqp, SC):
             Dt = D(kbT, SC)
-            return np.abs(nqp(kbT, Dt, SC) - Nqp / SC.V)
+            return np.abs(nqp(kbT, Dt, SC) - nqp)
 
         res = minisc(
             minfunc,
             bounds=(0, 0.9 * SC.kbTc),
-            args=(Nqp, SC),
+            args=(nqp, SC),
             method="bounded",
             options={"xatol": 1e-15},
         )
@@ -138,27 +138,28 @@ def kbTeff(Nqp, SC):
             return res.x
 
 
-def beta(kbT, D, SC):
-    """calculates beta, a measure for how thin the film is, 
+def beta(kbT, D, SCsheet):
+    """calculates beta, a measure for how thin the film is
     compared to the penetration depth.
     D -- energy gap
     kbT -- temperature in µeV
     SC -- Superconductor object, from the SC class"""
+    SC = SCsheet.SC
     lbd = SC.lbd0 * 1 / np.sqrt(D / SC.D0 * np.tanh(D / (2 * kbT)))
-    return 1 + 2 * SC.d / (lbd * np.sinh(2 * SC.d / lbd))
+    return 1 + 2 * SCsheet.d / (lbd * np.sinh(2 * SCsheet.d / lbd))
 
 
-def Qi(s1, s2, ak, kbT, D, SC):
+def Qi(s1, s2, ak, kbT, D, SCsheet):
     """Calculates the internal quality factor, 
     from the complex conductivity. See PdV PhD thesis eq. (2.23)"""
-    b = beta(kbT, D, SC)
+    b = beta(kbT, D, SCsheet)
     return 2 * s2 / (ak * b * s1)
 
 
-def hwres(s2, hw0, s20, ak, kbT, D, SC):
+def hwres(s2, hw0, s20, ak, kbT, D, SCsheet):
     """Gives the resonance frequency in µeV, from the sigma2,
     from a linearization from point hw0,sigma20. See PdV PhD eq. (2.24)"""
-    b = beta(kbT, D, SC)
+    b = beta(kbT, D, SCsheet)
     return hw0 * (1 + ak * b / 4 / s20 * (s2 - s20))  # note that is linearized
 
 
@@ -174,7 +175,7 @@ def S21(Qi, Qc, hwread, dhw, hwres):
 
 
 def hwread(hw0, kbT0, ak, kbT, D, SC):
-    """Calculates at which frequency, on probes at resonance. 
+    """Calculates at which frequency, one probes at resonance. 
     This must be done iteratively, as the resonance frequency is 
     dependent on the complex conductivity, which in turn depends on the
     read frequency."""
@@ -196,14 +197,14 @@ def hwread(hw0, kbT0, ak, kbT, D, SC):
         return res.x
 
 
-def calc_Nwsg(kbT, D, e, SC):
+def calc_Nwsg(kbT, D, e, V):
     """Calculates the number of phonons with the Debye approximation, 
     for Al."""
 
-    def integrand(E, kbT, SC):
+    def integrand(E, kbT, V):
         return (
             3
-            * SC.V
+            * V
             * E ** 2
             / (
                 2
@@ -214,16 +215,18 @@ def calc_Nwsg(kbT, D, e, SC):
             )
         )
 
-    return integrate.quad(integrand, e + D, 2 * D, args=(kbT, SC))[0]
+    return integrate.quad(integrand, e + D, 2 * D, args=(kbT, V))[0]
 
 
-def tau_kaplan(T, SC):
+def tau_kaplan(T, SCsheet):
     """Calculates the apparent quasiparticle lifetime from Kaplan. 
     See PdV PhD eq. (2.29)"""
+    SC = SCsheet.SC
     D_ = D(const.Boltzmann / const.e * 1e6 * T, SC)
     nqp_ = nqp(const.Boltzmann / const.e * 1e6 * T, D_, SC)
     taukaplan = (
-        SC.t0 * SC.N0 * SC.kbTc ** 3 / (4 * nqp_ * D_ ** 2) * (1 + SC.tesc / SC.tpb)
+        SC.t0 * SC.N0 * SC.kbTc ** 3 / (4 * nqp_ * D_ ** 2) *
+        (1 + SCsheet.tesc / SC.tpb)
     )
     return taukaplan
 
@@ -274,19 +277,19 @@ def tauscat_kaplan(kbT, SC):
     )
 
 
-def kbTbeff(tqpstar, SC, plot=False):
+def kbTbeff(tqpstar, SCsheet, plot=False):
     """Calculates the effective temperature, from a
     quasiparticle lifetime."""
-    Nqp_0 = (
-        SC.V
-        * SC.t0
+    SC = SCsheet.SC
+    nqp_0 = (
+        SC.t0
         * SC.N0
         * SC.kbTc ** 3
         / (2 * SC.D0 ** 2 * tqpstar)
-        * (1 + SC.tesc / SC.tpb)
+        * (1 + SCsheet.tesc / SC.tpb)
         / 2
     )
-    return kbTeff(Nqp_0, SC)
+    return kbTeff(nqp_0, SC)
 
 
 def tesc(kbT, tqpstar, SC):
@@ -298,11 +301,12 @@ def tesc(kbT, tqpstar, SC):
     )
 
 
-def nqpfromtau(tau, SC):
+def nqpfromtau(tau, SCsheet):
     """Calculates the density of quasiparticles from the quasiparticle lifetime."""
+    SC = SCsheet.SC
     return (
         SC.t0
         * SC.N0
         * SC.kbTc ** 3
-        / (2 * SC.D0 ** 2 * 2 * tau / (1 + SC.tesc / SC.tpb))
+        / (2 * SC.D0 ** 2 * 2 * tau / (1 + SCsheet.tesc / SC.tpb))
     )

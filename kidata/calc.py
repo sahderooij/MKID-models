@@ -8,9 +8,8 @@ from scipy.optimize import minimize_scalar as minisc
 from scipy.special import k0, i0
 from scipy import interpolate
 
-from kidcalc import D, beta, cinduct, nqp
 import kidcalc
-from SC import Al
+import SC as SuperCond
 
 from kidata import io
 from kidata.plot import _selectPread
@@ -18,7 +17,7 @@ from kidata.plot import _selectPread
 # NOTE: all units are in 'micro': µeV, µm, µs etc.
 
 
-def ak(S21data, SC=None, plot=False, reterr=False, method="df"):
+def ak(S21data, SC=None, plot=False, reterr=False, method="df", Tmin= .25):
     """Calculates the kinetic induction fraction, based on Goa2008, PhD Thesis. 
     Arguments:
     S21data -- the content of the .csv from the S21-analysis. 
@@ -32,10 +31,10 @@ def ak(S21data, SC=None, plot=False, reterr=False, method="df"):
     optionally: the error in ak from fitting."""
 
     if SC is None:
-        SC = Al(Tc=S21data[0, 21], V=S21data[0, 14], d=S21data[0, 25])
+        SC = SuperCond.Al(Tc=S21data[0, 21])
 
     # Extract relevant data
-    hw = S21data[:, 5] * const.Plack / const.e * 1e6  # µeV
+    hw = S21data[:, 5] * const.Planck / const.e * 1e6  # µeV
     kbT = S21data[:, 1] * const.Boltzmann / const.e * 1e6  # µeV
     hw0 = hw[0]
 
@@ -48,7 +47,7 @@ def ak(S21data, SC=None, plot=False, reterr=False, method="df"):
     # Mask the double measured temperatures, and only fit from 250 mK
     mask1 = np.zeros(len(y), dtype="bool")
     mask1[np.unique(np.round(S21data[:, 1], decimals=2), return_index=True)[1]] = True
-    mask = np.logical_and(mask1, (kbT >= 0.25 * const.Boltzmann / const.e * 1e6))
+    mask = np.logical_and(mask1, (kbT >= Tmin * const.Boltzmann / const.e * 1e6))
 
     if mask.sum() > 3:
         y = y[mask]
@@ -59,14 +58,20 @@ def ak(S21data, SC=None, plot=False, reterr=False, method="df"):
     # define x to fit:
     x = np.zeros(len(y))
     i = 0
-    s0 = cinduct(hw0, D(kbT[0], SC), kbT[0])
+    s0 = kidcalc.cinduct(hw0, kidcalc.D(kbT[0], SC), kbT[0])
     for kbTi in kbT[mask]:
-        D_0 = D(kbTi, SC)
-        s = cinduct(hw[i], D_0, kbTi)
+        D_0 = kidcalc.D(kbTi, SC)
+        s = kidcalc.cinduct(hw[i], D_0, kbTi)
         if method == "df":
-            x[i] = (s[1] - s0[1]) / s0[1] * beta(kbTi, D_0, SC) / 4
+            x[i] = (s[1] - s0[1]) / s0[1] * kidcalc.beta(kbTi, D_0,
+                                                         SuperCond.Sheet(
+                                                             SC, d=S21data[0, 25]
+                                                         )) / 4
         elif method == "Qi":
-            x[i] = (s[0] - s0[0]) / s0[1] * beta(kbTi, D_0, SC) / 2
+            x[i] = (s[0] - s0[0]) / s0[1] * kidcalc.beta(kbTi, D_0,
+                                                         SuperCond.Sheet(
+                                                             SC, d=S21data[0, 25]
+                                                         )) / 2
         i += 1
 
     # do the fit:
@@ -228,7 +233,7 @@ def Respspl(Chipnum, KIDnum, Pread, phasemethod="f0", ampmethod="Qi", var="cross
     return Respspl
 
 
-def NLcomp(Chipnum, KIDnum, Pread, SC=None, method="", var="cross"):
+def NLcomp(Chipnum, KIDnum, Pread, SCvol=None, method="", var="cross"):
     """Returns a spline representation of a Noise Level (non-dB) vs Temperature (K), 
     with which the measured noise level can be compensated. For example,
     the method \'Resp\' gives the responsivity squared. If the measured 
@@ -236,15 +241,17 @@ def NLcomp(Chipnum, KIDnum, Pread, SC=None, method="", var="cross"):
     the quasiparticle fluctuation level.
     Arguments:
     Chipnum, KIDnum, Pread -- define which data is to be used (S21data and/or pulse data)
-    SC -- a SuperConductor object (see SC module), which defines superconductor properties
+    SCvol -- a Volume object (see SC module), which defines superconductor properties
     method -- defines which level is to be returned. See if statements in the function for the options.
             (future: multiply every individual method stated in the method string)
     var -- gives the type of PSD to be compensated - cross, amp or phase - and is used 
             if \'Reps\' is in the method """
 
-    if SC is None and method != "":
+    if SCvol is None and method != "":
         S21data = io.get_S21data(Chipnum, KIDnum, Pread)
-        SC = Al(Tc=S21data[0, 21], V=S21data[0, 14], d=S21data[0, 25])
+        SCvol = SuperCond.Volume(SuperCond.Al(Tc=S21data[0, 21]),
+                              V=S21data[0, 14],
+                              d=S21data[0, 25])
 
     if method != "":
         S21data = io.get_S21data(Chipnum, KIDnum, Pread)
@@ -253,18 +260,19 @@ def NLcomp(Chipnum, KIDnum, Pread, SC=None, method="", var="cross"):
 
         if method == "QakV":
             lvlcompspl = interpolate.splrep(
-                S21data[:, 1], (S21data[:, 2] * akin) ** 2 / SC.V ** 2, s=0
+                S21data[:, 1], (S21data[:, 2] * akin) ** 2 / SCvol.V ** 2, s=0
             )
 
         elif method == "QaksqrtV":
             lvlcompspl = interpolate.splrep(
-                S21data[:, 1], (S21data[:, 2] * akin) ** 2 / (SC.V), s=0
+                S21data[:, 1], (S21data[:, 2] * akin) ** 2 / (SCvol.V), s=0
             )
 
         elif method == "QaksqrtVtesc":
             lvlcompspl = interpolate.splrep(
                 S21data[:, 1],
-                (S21data[:, 2] * akin) ** 2 / (SC.V * (1 + SC.tesc / SC.tpb)),
+                (S21data[:, 2] * akin) ** 2 /
+                (SCvol.V * (1 + SCvol.tesc / SCvol.SC.tpb)),
                 s=0,
             )
 
@@ -273,10 +281,10 @@ def NLcomp(Chipnum, KIDnum, Pread, SC=None, method="", var="cross"):
                 S21data[:, 1],
                 (S21data[:, 2] * akin) ** 2
                 / (
-                    SC.V
-                    * (1 + SC.tesc / SC.tpb)
+                    SCvol.V
+                    * (1 + SCvol.tesc / SCvol.SC.tpb)
                     * (const.Boltzmann / const.e * 1e6 * S21data[0, 21]) ** 3
-                    / (SC.D0 / const.e * 1e6) ** 2
+                    / (SCvol.SC.D0 / const.e * 1e6) ** 2
                 ),
                 s=0,
             )
@@ -318,7 +326,7 @@ def NLcomp(Chipnum, KIDnum, Pread, SC=None, method="", var="cross"):
                 interpolate.splev(
                     S21data[:, 1], Respspl(Chipnum, KIDnum, Pread, var=var)
                 )
-                * SC.V,
+                * SCvol.V,
                 s=0,
             )
 
@@ -329,10 +337,11 @@ def NLcomp(Chipnum, KIDnum, Pread, SC=None, method="", var="cross"):
                 interpolate.splev(
                     S21data[:, 1], Respspl(Chipnum, KIDnum, Pread, var=var)
                 )
-                * SC.V
-                * (1 + SC.tesc / SC.tpb)
+                * SCvol.V
+                * (1 + SCvol.tesc / SCvol.tpb)
                 * (kbTc) ** 3
-                / (kidcalc.D(const.Boltzmann / const.e * 1e6 * S21data[:, 1], SC)) ** 2,
+                / (kidcalc.D(const.Boltzmann / const.e * 1e6 * S21data[:, 1],
+                             SCvol.SC)) ** 2,
                 s=0,
             )
 
@@ -534,7 +543,7 @@ def double_exp(pulse, pulsestart=500, sfreq=1e6,
 def tesc(
     Chipnum,
     KIDnum,
-    SC=None,
+    SCvol=None,
     usePread="max",
     minTemp=200,
     maxTemp=400,
@@ -555,9 +564,12 @@ def tesc(
 
     TDparam = io.get_grTDparam(Chipnum)
     Pread = _selectPread(usePread, io.get_grPread(TDparam, KIDnum))[0]
-    if SC is None:
+    if SCvol is None:
         S21data = io.get_S21data(Chipnum, KIDnum)
-        SC = Al(Tc=S21data[0, 21], V=S21data[0, 14], d=S21data[0, 25])
+        SCvol = SuperCond.Volume(
+            SuperCond.Al(Tc=S21data[0, 21]),
+            V=S21data[0, 14],
+            d=S21data[0, 25])
 
     Temp = io.get_grTemp(TDparam, KIDnum, Pread)
     Temp = Temp[np.logical_and(Temp < maxTemp, Temp > minTemp)]
@@ -574,13 +586,15 @@ def tesc(
             tescar[i] = np.nan
         else:
             tescar[i] = kidcalc.tesc(
-                const.Boltzmann / const.e * 1e6 * Temp[i] * 1e-3, tqpstar[i], SC
+                const.Boltzmann / const.e * 1e6 * Temp[i] * 1e-3, tqpstar[i],
+                SCvol.SC
             )
             tescarerr[i] = np.abs(
                 kidcalc.tesc(
-                    const.Boltzmann / const.e * 1e6 * Temp[i] * 1e-3, tqpstarerr[i], SC
+                    const.Boltzmann / const.e * 1e6 * Temp[i] * 1e-3,
+                    tqpstarerr[i], SCvol.SC
                 )
-                + SC.tpb
+                + SCvol.SC.tpb
             )
 
     if tescar[~np.isnan(tescar)].size > 0:
@@ -600,7 +614,7 @@ def tesc(
         )
         tesc1 = defaulttesc
         tescerr = 0
-    SC.tesc = tesc1
+    SCvol.tesc = tesc1
     if pltkaplan:
         plt.figure()
         plt.errorbar(Temp, tqpstar, yerr=tqpstarerr, capsize=5.0, fmt="o")
@@ -608,11 +622,12 @@ def tesc(
         plt.errorbar(Temp[mask], tqpstar[mask], fmt="o")
         try:
             T = np.linspace(
-                Temp[~np.isnan(tqpstar)].min(), Temp[~np.isnan(tqpstar)].max(), 100
+                Temp[~np.isnan(tqpstar)].min(),
+                Temp[~np.isnan(tqpstar)].max(), 100
             )
         except ValueError:
             T = np.linspace(minTemp, maxTemp, 100)
-        taukaplan = kidcalc.tau_kaplan(T * 1e-3, SC)
+        taukaplan = kidcalc.tau_kaplan(T * 1e-3, SCvol)
         plt.plot(T, taukaplan)
         plt.yscale("log")
         plt.ylim(None, 1e4)
@@ -637,7 +652,7 @@ def get_tescdict(Chipnum, Pread="max"):
     return tescdict
 
 
-def NqpfromQi(S21data, uselowtempapprox=True, SC=Al()):
+def NqpfromQi(S21data, uselowtempapprox=True, SC=SuperCond.Al()):
     """Calculates the number of quasiparticles from the measured temperature dependence of Qi.
     Returns temperatures in K, along with the calculated quasiparticle numbers. 
     If uselowtempapprox, the complex impedence is calculated directly with a low 
@@ -648,7 +663,10 @@ def NqpfromQi(S21data, uselowtempapprox=True, SC=Al()):
     kbT = S21data[:, 1] * const.Boltzmann / const.e * 1e6
 
     if uselowtempapprox:
-        beta_ = beta(kbT[0], SC.D0, SC)
+        beta_ = kidcalc.beta(kbT[0], SC.D0, SuperCond.Sheet(
+            SC,
+            d=S21data[0, 25]
+        ))
 
         def minfunc(kbT, s2s1, hw, D0):
             xi = hw / (2 * kbT)
@@ -672,24 +690,27 @@ def NqpfromQi(S21data, uselowtempapprox=True, SC=Al()):
                 method="bounded",
             )
             kbTeff = res.x
-            Nqp[i] = S21data[0, 14] * nqp(kbTeff, SC.D0, SC)
+            Nqp[i] = S21data[0, 14] * kidcalc.nqp(kbTeff, SC.D0, SC)
         return kbT / (const.Boltzmann / const.e * 1e6), Nqp
     else:
 
         def minfunc(kbT, s2s1, hw, SC):
-            D_ = D(kbT, SC)
-            s1, s2 = cinduct(hw, D_, kbT)
+            D_ = kidcalc.D(kbT, SC)
+            s1, s2 = kidcalc.cinduct(hw, D_, kbT)
             return np.abs(s2s1 - s2 / s1)
 
         Nqp = np.zeros(len(kbT))
         for i in range(len(kbT)):
-            D_0 = D(kbT[i], SC)
-            beta_ = beta(lbd0, D_0, SC)
+            D_0 = kidcalc.D(kbT[i], SC)
+            beta_ = kidcalc.beta(kbT[i], D_0, SuperCond.Sheet(
+                SC,
+                d=S21data[0, 25]
+            ))
             s2s1 = S21data[i, 4] * (ak_ * beta_) / 2
             res = minisc(
                 minfunc, args=(s2s1, hw[i], SC), bounds=(0, SC.kbTc), method="bounded"
             )
             kbTeff = res.x
-            D_ = D(kbTeff, SC)
-            Nqp[i] = S21data[0, 14] * nqp(kbTeff, D_, SC)
+            D_ = kidcalc.D(kbTeff, SC)
+            Nqp[i] = S21data[0, 14] * kidcalc.nqp(kbTeff, D_, SC)
         return kbT / (const.Boltzmann / const.e * 1e6), Nqp

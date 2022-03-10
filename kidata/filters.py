@@ -70,8 +70,8 @@ def del_1fnNoise(freq, SPR, minn=0.35, plot=False):
     try:
         fit = curve_fit(
             lambda f, a, b: a * f ** (-b),
-            freq[~np.isnan(SPRn)][1:],
-            SPRn[~np.isnan(SPRn)][1:],
+            freq[~np.isnan(SPRn)][2:],
+            SPRn[~np.isnan(SPRn)][2:],
             p0=(SPRn[~np.isnan(SPRn)][1:4].mean(), 1),
         )
         if fit[0][1] > minn:
