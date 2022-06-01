@@ -1,4 +1,4 @@
-"""This module contains functions that handle IQ data-streams."""
+"""This module contains functions that handle IQ- and (amplitude,phase)-data-streams."""
 
 import matplotlib.pyplot as plt
 from scipy.ndimage.filters import uniform_filter1d

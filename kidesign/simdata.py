@@ -9,9 +9,15 @@ def get_Sondata(filename):
         line = file.readline()
         while line != "":
             dataset = {'Header': [], 'Params': {}, 'Data': []}
-            while line != 'R 50.00000\n' and line != "":
-                dataset['Header'].append(line.replace('\n', ''))
-                line = file.readline()
+            while (line.split(' ')[0] not in ['R', 'TERM', 'FTERM'] and '=' not in line) and line != "":
+                if line.split(' ')[0] == 'FTERM':
+                    for i in range(3):
+                        dataset['Header'].append(line.replace('\n', ''))
+                        line = file.readline()
+                else:
+                    dataset['Header'].append(line.replace('\n', ''))
+                    line = file.readline()
+            dataset['Header'].append(line.replace('\n', ''))
             colnames = file.readline().replace('\n', '').split(',')
             dataset['Data'] = pd.DataFrame(columns=colnames)
             line = file.readline()

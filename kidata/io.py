@@ -13,10 +13,11 @@ def get_datafld():
                 - KID{KIDnum}_{Pread}dBm_.dat: raw frequency sweeps
                 - KID{KIDnum}_{Pread}dBm_Tdep.csv: results for the MATLAB S21analsysis 
         - Noise_vs_T
-            - TD_2D: raw .bin files
+            - TD_{subfld}: raw .bin files
                 - KID{KIDnum}_{Pread}dBm__TD{fast/med/slow}_TmK{Temperature}.bin
             - FFT: other files from the measurement 
-                - 2D
+                - {subfld}
+            subfld is standard '2D', but can be passed to the io functions.
         - NoiseTDanalyse: the results of the noise post-processing.
             - TDresults.mat: same structure as the MATLAB routine for PdV.
         - Pulse
@@ -173,12 +174,12 @@ def get_avgpulse(Chipnum, KID, Pread, T, wvl, subfolder='', std=False):
     return data[:, ind], data[:, ind + 2]
 
 
-def get_avgpulseinfo(Chipnum, KID, Pread, T, wvl):
+def get_avgpulseinfo(Chipnum, KID, Pread, T, wvl, subfolder=''):
     '''Returns the stream number (vis{nr}), location and prominence of
     the peaks used in the kidata.pulse.calc_avgpulse() function.'''
     strms, locs, proms = np.genfromtxt(
         get_datafld() +
-        f'{Chipnum}\\Pulse\\{wvl}nm\\KID{KID}_{Pread}dBm__TmK{T}_avgpulse_info.csv',
+        f'{Chipnum}\\Pulse\\{wvl}nm\\{subfolder}KID{KID}_{Pread}dBm__TmK{T}_avgpulse_info.csv',
         delimiter=',', skip_header=1).T
     return strms.astype(int), locs.astype(int), proms
 
@@ -188,6 +189,16 @@ def get_pulsewvl(Chipnum):
     return np.unique([int(i.split('\\')[-1][:-2])
                       for i in glob.iglob(
                           get_datafld() + f'{Chipnum}\\Pulse\\*nm')])
+
+def get_pulseKIDPrT(Chipnum, wvl, subfolder=''):
+    csvs = np.array([[int(i.split('\\')[-1].split('_')[0][3:]),
+                      int(i.split('\\')[-1].split('_')[1][:-3]),
+                      int(i.split('\\')[-1].split('_')[3][3:])]
+                     for i in glob.iglob(get_datafld() + f'{Chipnum}\\Pulse\\{wvl}nm\\{subfolder}*.csv')])
+    csvdf = pd.DataFrame(csvs, columns=['KID', 'Pread', 'T']).sort_values(
+        by=['KID', 'Pread', 'T'])
+    csvdf = csvdf.drop_duplicates()
+    return csvdf.values
 
 
 def get_pulseKIDs(Chipnum, wvl, subfolder=''):
@@ -242,29 +253,27 @@ def get_pulsedata(Chipnum, KIDnum, Pread, Tbath, wvlngth, points=3000):
 # GR Noise
 
 
-def get_noiseS21dat(Chipnum, KIDnum, Pread=None, dB=True):
+def get_noiseS21dat(Chipnum, KIDnum, Pread=None, dB=True, subfld='2D'):
     '''Returns the content of the raw .dat-file of the S21-sweep in the FFT/2D folder.
     If read power is not specified, the maximum is chosen.
     The values in decibel is default, but linear is also possible (this is not calibrated yet!)'''
     if Pread is None:
         Pread = get_grPread(get_grTDparam(Chipnum), KIDnum)[0]
     datafld = get_datafld()
-    path = datafld + "{}/Noise_vs_T/FFT/2D/KID{}_{}dBm__{}.dat".format(
-        Chipnum, KIDnum, Pread, 'S21dB' if dB else 'S21')
+    path = datafld + f"{Chipnum}/Noise_vs_T/FFT/{subfld}/KID{KID}_{Pread}dBm__{'S21dB' if dB else 'S21'}.dat"
     return read_dat(path)
 
 
-def get_noisetddat(Chipnum, KIDnum, Pread=None):
+def get_noisetddat(Chipnum, KIDnum, Pread=None, subfld='2D'):
     '''Returns the content of the raw .dat-file with the time domain noise.'''
     if Pread is None:
         Pread = get_grPread(get_grTDparam(Chipnum), KIDnum)[0]
     datafld = get_datafld()
-    path = datafld + "{}/Noise_vs_T/FFT/2D/KID{}_{}dBm__td.dat".format(
-        Chipnum, KIDnum, Pread)
+    path = datafld + f"{Chipnum}/Noise_vs_T/FFT/{subfld}/KID{KID}_{Pread}dBm__td.dat"
     return read_dat(path)
 
 
-def get_noisebin(Chipnum, KIDnum, Pread=None, T=None, freq='med'):
+def get_noisebin(Chipnum, KIDnum, Pread=None, T=None, freq='med', subfld='2D'):
     '''Returns the contents of the .bin-file with raw (calibrated) noise in I and Q.'''
     if Pread is None:
         Pread = get_grPread(get_grTDparam(Chipnum), KIDnum)[0]
@@ -272,7 +281,7 @@ def get_noisebin(Chipnum, KIDnum, Pread=None, T=None, freq='med'):
         T = get_grTemp(get_grTDparam(Chipnum), KIDnum, Pread)[0]
     datafld = get_datafld()
     path = datafld + \
-        f"{Chipnum}/Noise_vs_T/TD_2D/KID{int(KIDnum)}_{int(Pread)}dBm__TD{freq}_TmK{int(T)}.bin"
+        f"{Chipnum}/Noise_vs_T/TD_{subfld}/KID{int(KIDnum)}_{int(Pread)}dBm__TD{freq}_TmK{int(T)}.bin"
     return np.fromfile(path, dtype='>f8').reshape(-1, 2)
 
 

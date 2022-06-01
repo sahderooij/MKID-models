@@ -13,6 +13,7 @@ from kidata.IQ import to_ampphase, subtr_offset, smooth
 
 def do_TDanalysis(
     Chipnum,
+    subfld='2D',
     resultpath=None,
     matname="TDresults",
     ppd=30,
@@ -42,7 +43,7 @@ def do_TDanalysis(
 
     # find all KIDs, Read powers and Temperatures
     assert glob.glob(
-        io.get_datafld() + f"{Chipnum}/Noise_vs_T/TD_2D/*.bin"
+        io.get_datafld() + f"{Chipnum}/Noise_vs_T/TD_{subfld}/*.bin"
     ), "Data not found"
 
     KIDPrT = np.array(
@@ -53,7 +54,7 @@ def do_TDanalysis(
                 int(i.split("\\")[-1].split("_")[4][3:-4]),
             ]
             for i in glob.iglob(
-                io.get_datafld() + f"{Chipnum}/Noise_vs_T/TD_2D/*TD{freqs[0]}*.bin"
+                io.get_datafld() + f"{Chipnum}/Noise_vs_T/TD_{subfld}/*TD{freqs[0]}*.bin"
             )
         ]
     )
@@ -146,7 +147,7 @@ def do_TDanalysis(
                         )
 
                     noisedata = io.get_noisebin(
-                        Chipnum, KIDs[i], Preads[j], Temps[k], freq=freq
+                        Chipnum, KIDs[i], Preads[j], Temps[k], freq=freq, subfld=subfld
                     )
                     amp, phase = to_ampphase(noisedata)
                     spamp, rejected[l, 0] = rej_pulses(

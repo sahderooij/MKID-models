@@ -557,7 +557,7 @@ def tesc(
 ):
     """Calculates the phonon escape time from the GR noise lifetimes and Kaplan.
     Uses data at Pread (default max), and temperatures between minTemp,maxTemp
-    (default (300,400)). Only lifetimes between taunonkaplan and taures, and with
+    (default (200,400)). Only lifetimes between taunonkaplan and taures, and with
     a relative error threshold of relerrthrs are considered.
     The remaining lifetimes, tesc is calculated and averaged. The error (optional return) 
     is the variance of the remaining lifetimes. If this fails, defaulttesc is returned."""

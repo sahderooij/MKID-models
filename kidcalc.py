@@ -100,7 +100,7 @@ def nqp(kbT, D, SC):
                 type(kbT) is float,
                 type(D) is float,
                 type(kbT) is np.float64,
-                type(D) is np.float(64),
+                type(D) is np.float64,
             ]
         ):  # make sure it can deal with kbT,D arrays
             return integrate.quad(integrand, D, np.inf, args=(kbT, D, SC))[0]

@@ -93,7 +93,7 @@ def spec(
     for KIDnum in KIDlist:
         if lvlcomp != "":
             if SCvol is None:
-                SCvol = SuperCond.init_SC(Chipnum, KIDnum, **SCkwargs)
+                SCvol = SuperCond.init_SCvol(Chipnum, KIDnum, **SCkwargs)
         else:
             SCvol = SuperCond.Vol(SuperCond.Al(), np.nan, np.nan)
             
@@ -322,7 +322,7 @@ def ltnlvl(
 
         if lvlcomp != "" or pltkaplan or pltthmlvl or pltthlvl or pltTTc:
             if SCvol is None:
-                SCvol = SuperCond.init_SC(Chipnum, KIDnum, **SCkwargs)
+                SCvol = SuperCond.init_SCvol(Chipnum, KIDnum, **SCkwargs)
         else:
             SCvol = SuperCond.Vol(SuperCond.Al(), np.nan, np.nan)
 
@@ -642,7 +642,7 @@ def Nqp(
         clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax)
         clb.ax.set_title(r"$P_{read}$ (dBm)")
     if SCvol is None:
-        SCvol = SuperCond.init_SC(Chipnum, KIDnum, set_tesc=pltNqptau, **SCkwargs)
+        SCvol = SuperCond.init_SCvol(Chipnum, KIDnum, set_tesc=pltNqptau, **SCkwargs)
 
     for Pread in Preadar:
         S21data = io.get_S21data(Chipnum, KIDnum, Pread)

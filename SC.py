@@ -74,6 +74,14 @@ class Superconductor(object):
         """BSC Coherence length at T = 0 K (in [µm])"""
         return const.hbar * 1e12 / const.e * self.vF / (np.pi * self.D0)
 
+    @property
+    def jc(self):
+        """Critical current density, in A/µm^2, from Romijn1982"""
+        return .75*np.sqrt(
+            self.N0 * self.D0**3 /
+            (self.rhon * 1e-2 / const.e * const.hbar * 1e12 / const.e)
+                           )
+
 
 # Sub-classes, which are the actual superconductors
 class PEC(Superconductor):
@@ -128,7 +136,7 @@ class TiN(Superconductor):
 class NbTiN(Superconductor):
     def __init__(self, Tc=15.1, rhon=115.):
         super().__init__(
-            'NbTiN', Tc, np.nan, np.nan, rhon, np.nan, np.nan, np.nan, np.nan)
+            'NbTiN', Tc, np.nan, 3.7e4, rhon, np.nan, np.nan, np.nan, np.nan)
 
 
 class Sheet(object):
@@ -173,6 +181,10 @@ class Vol(Sheet):
 
     def checkV(self):
         return self.w * self.l * self.d == self.V
+
+    @property
+    def Ic(self):
+        return self.SC.jc * self.w * self.d
 
 ###############################################################################
 

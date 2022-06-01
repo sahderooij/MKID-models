@@ -184,7 +184,7 @@ class KID(object):
         s1, s2 = kidcalc.cinduct(hwread + dhw, D, kbTeff)
 
         Qi = kidcalc.Qi(s1, s2, self.ak, kbTeff, D,
-                       SC.Sheet(self.SC, self.d))
+                        SC.Sheet(self.SC, self.d))
         hwres = kidcalc.hwres(s2, self.hw0, s20, self.ak, kbTeff, D,
                               SC.Sheet(self.SC, self.d))
         return kidcalc.S21(Qi, self.Qc, hwread, dhw, hwres)
@@ -195,7 +195,7 @@ class KID(object):
         # Define circle at this temperature:
         s_0 = kidcalc.cinduct(hwread, D_0, self.kbT)
         Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak, self.kbT, D_0,
-                         SC.Sheet(self.SC, self.d))
+                          SC.Sheet(self.SC, self.d))
         S21min = self.Qc / (self.Qc + Qi_0)  # Q/Qi
         xc = (1 + S21min) / 2
         # translate S21 into this circle:
@@ -206,7 +206,7 @@ class KID(object):
     def calc_linresp(self, Nqp, hwread, D_0):
         s_0 = kidcalc.cinduct(hwread, D_0, self.kbT)
         Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak, self.kbT, D_0,
-                         SC.Sheet(self.SC, self.d))
+                          SC.Sheet(self.SC, self.d))
         Q = Qi_0 * self.Qc / (Qi_0 + self.Qc)
         beta = kidcalc.beta(self.kbT, D_0, SC.Sheet(self.SC, self.d))
 
