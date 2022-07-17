@@ -68,6 +68,7 @@ def spec(
     ax12=None,
     xlim=(None, None),
     ylim=(None, None),
+    **kwargs
 ):
     """Plots PSDs of multiple KIDs, read powers and temperatures (indicated by color). Every KID has a new figure, which is returned if only one KID is plotted.
     lvlcomp specifies how the noise levels should be compensated (will be a different function in the future). 
@@ -120,7 +121,7 @@ def spec(
 
             Temp = Temp[np.logical_and(Temp < Tminmax[1], Temp > Tminmax[0])]
             if cmap is None or norm is None:
-                cmap = matplotlib.cm.get_cmap("viridis")
+                cmap = matplotlib.cm.get_cmap("summer")
                 norm = matplotlib.colors.Normalize(Temp.min(), Temp.max())
             if clbar:
                 clb = plt.colorbar(
@@ -158,7 +159,7 @@ def spec(
                         10 ** (SPR / 10) / interpolate.splev(Temp[i] * 1e-3, lvlcompspl)
                     )
 
-                    axs[ax1, ax2].plot(freq, SPR, color=cmap(norm(Temp[i])))
+                    axs[ax1, ax2].plot(freq, SPR, color=cmap(norm(Temp[i])), **kwargs)
                     axs[ax1, ax2].set_xscale("log")
                     axs[ax1, ax2].set_title(spec + ", -{} dBm".format(Pread))
                     axs[-1, ax2].set_xlabel("Freq. (Hz)")

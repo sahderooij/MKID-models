@@ -9,13 +9,14 @@ from tqdm.notebook import tnrange
 import warnings
 from scipy.signal import savgol_filter
 
-from kidata.IQ import to_ampphase
+from kidata.IQ import to_ampphase, to_RX
 from kidata import io
 
 
 def calc_pulseavg(
     filelocation, KIDPrT=None, save_location=None,
-    pulse_len=2000, start=500, minmax_proms=None, kid_property="substrate",
+    pulse_len=2000, start=500, minmax_proms=None, 
+    coord='ampphase'
 ):
     """Script that runs a temp sweep of a certain data set and saves it.
     filelocation: the folder that contains .bin files.
@@ -24,9 +25,9 @@ def calc_pulseavg(
     pulse_len: (int) amount of points that will be taken from each pulse
     start: desired amount of noise points before the pulse
     minmax_prom: prominence spread of the desired peaks 
-        (run selected_proms to determine these, asks if not given)
-    KID_property: {'substrate','membrane'}, if membrane, it filters pulses
-        where the pre-pulse noise is too high. """
+        (run selected_proms to determine these, asks if not given) 
+    coord: choose coordinates in which the pulse is analysed: either 'ampphase' or 'RX' 
+        (the linear or non-linear, Smith, coordinates)."""
 
     if KIDPrT is None:
         KIDPrT = io.get_avlbins(filelocation)
@@ -45,7 +46,7 @@ def calc_pulseavg(
         save_location = "\\".join(glob.glob(filelocation)[0].split("\\")[:-1])
 
     if minmax_proms is None:
-        minmax_proms = select_proms(filelocation, KIDPrT, pulse_len)
+        minmax_proms = select_proms(filelocation, KIDPrT, pulse_len, 5, coord)
 
     KIDs = np.unique(KIDPrT[:, 0])
     for i in tnrange(len(KIDs), desc='KID', leave=False):
@@ -74,8 +75,11 @@ def calc_pulseavg(
                     data_info = (f"{filelocation}/KID{KID}_{Pread}dBm"
                                  f"__TDvis{n}_TmK{temp}_info.dat")
                     tres = calctres(data_info)
-
-                    amp, phase = to_ampphase(data)
+                    
+                    if coord == 'ampphase':
+                        amp, phase = to_ampphase(data)
+                    elif coord == 'RX':
+                        amp, phase = to_RX(data)
                     std = np.std(phase)
                     min_dist = 1.5 * pulse_len
 
@@ -87,12 +91,10 @@ def calc_pulseavg(
                         min_dist,
                         tres,
                         min_prom,
-                        max_prom,
-                        kid_property,
-                    )
+                        max_prom)
                     if amount_cur > 0:
                         cur_pulses_amp = get_amp(
-                            amp, locs_cur, pulse_len, start)
+                            amp, locs_cur, pulse_len, start, coord)
                         for m in range(amount_cur):
                             all_pulses_phase.append(peaks_cur[m, :])
                             all_pulses_amp.append(cur_pulses_amp[m, :])
@@ -131,27 +133,35 @@ def calc_pulseavg(
                 df = pd.DataFrame(data=d)
                 df.to_csv(
                     save_location
-                    + f"\\KID{KID}_{Pread}dBm__TmK{temp}_avgpulse_info.csv",
+                    + f"\\KID{KID}_{Pread}dBm__TmK{temp}_avgpulse_{coord}_info.csv",
                     index=False,
                 )
 
-                # save the avg puls and the STD
-                d = {
-                    "Phase": avg_pulse_phase,
-                    "Phase_std": std_phase,
-                    "Amp": avg_pulse_amp,
-                    "Amp_std": std_amp,
-                }
+                # save the avg pulse and the STD
+                if coord == 'ampphase':
+                    d = {
+                        "Amp": avg_pulse_amp,
+                        "Amp_std": std_amp,
+                        "Phase": avg_pulse_phase,
+                        "Phase_std": std_phase
+                    }
+                elif coord == 'RX':
+                    d = {
+                        "R": avg_pulse_amp,
+                        "R_std": std_amp,
+                        "X": avg_pulse_phase,
+                        "X_std": std_phase
+                    }
 
                 df = pd.DataFrame(data=d)
                 df.to_csv(
                     save_location +
-                    f"\\KID{KID}_{Pread}dBm__TmK{temp}_avgpulse.csv",
+                    f"\\KID{KID}_{Pread}dBm__TmK{temp}_avgpulse_{coord}.csv",
                     index=False,
                 )
 
 
-def select_proms(filelocation, KIDPrT=None, pulse_len=2e3, nstream=5):
+def select_proms(filelocation, KIDPrT=None, pulse_len=2e3, nstream=5, coord='ampphase'):
     # Shows you nstream timestreams and a hist of the peaks and
     # then asks you to select the wanted prominences
 
@@ -171,7 +181,10 @@ def select_proms(filelocation, KIDPrT=None, pulse_len=2e3, nstream=5):
                 total_prominences = np.empty(0)
                 for j in range(nstream):
                     data = io.get_bin(filelocation, KID, Pread, temp, j)
-                    amp, phase = to_ampphase(data)
+                    if coord == 'ampphase':
+                        amp, phase = to_ampphase(data)
+                    elif coord == 'RX':
+                        amp, phase = to_RX(data)
                     std = np.std(phase)
                     multiplier = 4
                     peaks, peakshight = find_peaks(
@@ -214,9 +227,7 @@ def findpeaks(
     min_dist,
     tres,
     min_prom,
-    max_prom,
-    kid_property="substrate",
-):
+    max_prom,):
     data = np.array(data)
 
     # retrieve all the peaks in the timestream
@@ -225,7 +236,6 @@ def findpeaks(
     threshold = len(data) / (2 * points)
 
     # variable to ensure you don't include too many peaks so the dist checks removes everything
-    # met masks proberen ipv opnieuw find_peaks
     while len(peaks) > threshold:
         prom += 0.05
         mask = prominences > prom
@@ -258,7 +268,7 @@ def findpeaks(
     )
 
     peaks, locations, prominences, amount = calc_offset(
-        peaks, amount, start, locations, data, prominences, kid_property, tres
+        peaks, amount, start, locations, data, prominences, tres
     )
     # Now we calculate the offset at the time of the peak by taking the average of the points before the peak (start)
 
@@ -266,7 +276,7 @@ def findpeaks(
     return peaks, locations, prominences, amount
 
 
-def get_amp(amp, locations, pulse_len, start):
+def get_amp(amp, locations, pulse_len, start, coord):
     all_peaks = np.empty((0, pulse_len))
 
     for i in range(len(locations)):
@@ -279,6 +289,8 @@ def get_amp(amp, locations, pulse_len, start):
             0,
         )
         all_peaks[i, :] -= np.average(all_peaks[i, 0: (start - 50)])
+        if coord == 'ampphase':
+            all_peaks[i, :] += 1
     return all_peaks
 
 
@@ -333,25 +345,16 @@ def cut_peaks(data, peaks, locations, proms, amount, points, start, tres):
     return all_peaks, true_locations, proms, amount_peaks
 
 
-def calc_offset(peaks, amount, start, locations, data, prominences, kid_property, tres):
+def calc_offset(peaks, amount, start, locations, data, prominences, tres):
     # create array to store offsets
     offsets = np.zeros(shape=amount)
-    deleted = []
     # calc offsets
     for i in range(amount):
         used_range = peaks[i, 0:start - int(5*tres)]
-
         offsets[i] = np.mean(used_range)
-        if kid_property == "membrane":
-            mask = used_range < 0
-            if sum(mask) < (0.05 * (start - int(5*tres))):
-                deleted.append(i)
         peaks[i, :] -= offsets[i]
-    proms = np.delete(prominences, deleted)
-    locations = np.delete(locations, deleted)
-    peaks = np.delete(peaks, deleted, 0)
     amount = len(locations)
-    return peaks, locations, proms, amount
+    return peaks, locations, prominences, amount
 
 
 def select_prominence(peaks, locations, prominences, min_prom, max_prom):

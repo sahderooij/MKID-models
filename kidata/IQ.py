@@ -7,6 +7,10 @@ from ipywidgets import interact
 import glob
 
 
+def norm_radius(data):
+    '''Normalize the of the circle to 1. It uses the mean radius of the whole bin file.'''
+    return data / np.sqrt(data[:, 0] ** 2 + data[:, 1] ** 2).mean()
+
 def to_ampphase(data):
     """Converts the I and Q variables from the raw .dat file to (normalized)
     amplitude and phase.
@@ -15,12 +19,21 @@ def to_ampphase(data):
 
     Returns:
     Amplitude, Phase: numpy arrays"""
-
-    Amp = np.sqrt(data[:, 0] ** 2 + data[:, 1] ** 2)
-    Amp /= Amp.mean()
-    Phase = np.pi - (np.arctan2(data[:, 1], data[:, 0]) % (2 * np.pi))
+    
+    ndata = norm_radius(data)
+    Amp = np.sqrt(ndata[:, 0] ** 2 + ndata[:, 1] ** 2)
+    Phase = np.pi - (np.arctan2(ndata[:, 1], ndata[:, 0]) % (2 * np.pi))
     return Amp, Phase
 
+
+def to_RX(data):
+    '''Converts IQ data to the non-linear (Smith) coördinates of Zobrist et al. 2021: 10.1117/1.JATIS.7.1.010501. 
+    These coördinates are normalized to the resonance circle.'''
+    ndata = norm_radius(data)
+    g = ndata[:, 0] + 1j * ndata[:, 1]
+    z = (1 + g) / (1 - g)
+    return z.real, z.imag
+    
 
 def subtr_offset(data, plot=False):
     """Subtracts a quadratic offset from a time stream (data) to compensate
@@ -52,7 +65,7 @@ def smooth(data, tau, sfreq):
     return uniform_filter1d(data, wnd, mode="wrap")
 
 
-def view_bins(path):
+def view_bins(path, coordinates='ampphase'):
     """A functions that plots the amplitude and phase from IQ data streams that
     are found in the folder indicated by path. Needs matplotlib widget
     back-end."""
@@ -64,10 +77,20 @@ def view_bins(path):
         axs[0].cla()
         axs[1].cla()
         data = np.fromfile(path + "\\" + file, dtype=">f8").reshape(-1, 2)
-        amp, phase = to_ampphase(data)
+        if coordinates == 'ampphase':
+            amp, phase = to_ampphase(data)
+            axs[1].set_ylabel("Phase (rad.)")
+            axs[0].set_ylabel("Amp. (normalized)")
+        elif coordinates == 'RX':
+            amp, phase = to_RX(data)
+            axs[1].set_ylabel("Reactance (norm.)")
+            axs[0].set_ylabel("Resistance (norm.)")
+        elif coordinates == 'IQ':
+            amp, phase = (data[:, 0], data[:, 1])
+            axs[1].set_ylabel("Q (norm.)")
+            axs[0].set_ylabel("I (norm.)")
         axs[1].plot(phase)
-        axs[1].set_ylabel("Phase (rad.)")
-        axs[0].set_ylabel("Amp. (normalized)")
+
         axs[0].plot(amp, color="orange")
         axs[1].set_xlabel("time (µs)")
 

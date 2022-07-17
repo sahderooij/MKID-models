@@ -7,6 +7,7 @@ from scipy.optimize import curve_fit
 from scipy.optimize import minimize_scalar as minisc
 from scipy.special import k0, i0
 from scipy import interpolate
+from scipy.signal import deconvolve
 
 import kidcalc
 import SC as SuperCond
@@ -372,7 +373,28 @@ def NLcomp(Chipnum, KIDnum, Pread, SCvol=None, method="", var="cross"):
         lvlcompspl = interpolate.splrep(np.linspace(0.01, 10, 10), np.ones(10))
     return lvlcompspl
 
-
+def deconv_ringtime(pulse, chip, kid, temp, pread=None,
+                   numtres=10, fs=1e6, plot=False):
+    S21data = io.get_S21data(chip, kid, pread)
+    Tind = (S21data[:, 1] - temp).argmin()
+    Q = S21data[Tind, 2]
+    fres = S21data[Tind, 5]
+    tres = Q / (fres * np.pi) * fs
+    t = np.arange(numtres*tres)
+    impulseresp = np.exp(-t/tres) 
+    impulseresp /= impulseresp.sum()
+    
+    deconv, remain = deconvolve(pulse, impulseresp)
+    if plot:
+        fig, axs = plt.subplots(2, 1, sharex=True)
+        for ax in axs:
+            ax.plot(pulse, label='data')
+            ax.plot(deconv, label=f'deconv., $\\tau_{{res}}$={tres:.0e} µs')
+            ax.plot(remain, label='remain')
+        axs[0].legend()
+        axs[0].set_yscale('log')
+    return deconv
+    
 def tau_pulse(
     pulse,
     pulsestart=500,
@@ -436,9 +458,9 @@ def fit_nonexppulse(
         dx/dt = -R x^2  -x/tss, 
     with r/(1-r)=R*xi*tss (Wang2014). 
     First, tss is estimated from the second part of the pulse decay (tsstfit), 
-    after which r is extracted with the full fit window (tfit). Both tfit and
-    tsstfit are with respect to the pulsestart.
-    Otherwise the fit does not converge.
+    after which r is extracted with the full fit window (tfit). Otherwise the fit does not converge.
+    Both tfit and tsstfit are with respect to the pulsestart.
+    
 
     Returns:
     tss -- in µs
@@ -461,18 +483,24 @@ def fit_nonexppulse(
 
     # now do the fit:
     def fitfun(t, r, xi):
-        return xi * (1 - r) / (np.exp(t / tss) - r)
+        return xi * (1 - r) / (np.exp(t / tss) - r) 
 
-    fit = curve_fit(fitfun, t2, peak2, p0=(0.5, peak2[0]), bounds=(0, [1, pulse.max()]))
+    fit = curve_fit(fitfun, t2, peak2, p0=(0.5, peak2[0]),
+                    bounds=([0, 0] , [1, pulse.max()]))
     R = fit[0][0] / (1 - fit[0][0]) / (fit[0][1] * tss)
 
     if plot:
-        plt.plot(t, pulse, label='data')
-        plt.plot(t2, fitfun(t2, fit[0][0], fit[0][1]), 'r', label='1/t-fit')
-        plt.plot(t[pulsestart:], fitfun(t[pulsestart:], fit[0][0], fit[0][1]),
+        fig, axs = plt.subplots(2, 1)
+        for ax in axs:
+            ax.plot(t, pulse, label='data')
+            ax.plot(t2, fitfun(t2, *fit[0]), 'r', label='Non exp. fit')
+            ax.plot(t[pulsestart:], fitfun(t[pulsestart:], *fit[0]),
                  'r--')
-        plt.yscale("log")
-        plt.legend()
+            tssmask = (t > tsstfit[0]) & (t < tsstfit[1])
+            ax.plot(t[tssmask], fitfun(t[tssmask], *fit[0]), 'r',
+                    linewidth=3., label='$\\tau_{ss}$ fit-range')
+        axs[0].set_yscale("log")
+        axs[0].legend()
 
     if reterr:
         return (
@@ -528,7 +556,7 @@ def double_exp(pulse, pulsestart=500, sfreq=1e6,
     )
     if plot:
         plt.plot(t, pulse, label='data')
-        plt.plot(t[fitmask], fitfun(t[fitmask], *fit[0]), 'r', label='1/t-fit')
+        plt.plot(t[fitmask], fitfun(t[fitmask], *fit[0]), 'r', label='double exp. fit')
         plt.plot(t[pulsestart:], fitfun(t[pulsestart:], *fit[0]),
                  'r--')
         plt.yscale("log")

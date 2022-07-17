@@ -158,15 +158,16 @@ def get_bin(folder, KID, Pread, T, strm):
             dtype=">f8").reshape(-1, 2)
 
 
-def get_avgpulse(Chipnum, KID, Pread, T, wvl, subfolder='', std=False):
+def get_avgpulse(Chipnum, KID, Pread, T, wvl, subfolder='', std=False, coord='ampphase'):
     '''Returns the phase and amplitude data (in that order)
     of the average pulse, calculated from kidata.pulse.calc_avgpulse.
     Note: the baseline is subtracted from amplitude.
     If std is True, the standard deviation is returned, instead of
-    the average.'''
+    the average.
+    the coord variable gives which analysis it should take. (either 'ampphase'(default) or 'RX')'''
     data = np.genfromtxt(
         get_datafld() +
-        f'{Chipnum}\\Pulse\\{wvl}nm\\{subfolder}KID{KID}_{Pread}dBm__TmK{T}_avgpulse.csv',
+        f'{Chipnum}\\Pulse\\{wvl}nm\\{subfolder}KID{KID}_{Pread}dBm__TmK{T}_avgpulse_{coord}.csv',
         delimiter=',', skip_header=1)
     ind = 0
     if std:
@@ -174,12 +175,12 @@ def get_avgpulse(Chipnum, KID, Pread, T, wvl, subfolder='', std=False):
     return data[:, ind], data[:, ind + 2]
 
 
-def get_avgpulseinfo(Chipnum, KID, Pread, T, wvl, subfolder=''):
+def get_avgpulseinfo(Chipnum, KID, Pread, T, wvl, subfolder='', coord='ampphase'):
     '''Returns the stream number (vis{nr}), location and prominence of
     the peaks used in the kidata.pulse.calc_avgpulse() function.'''
     strms, locs, proms = np.genfromtxt(
         get_datafld() +
-        f'{Chipnum}\\Pulse\\{wvl}nm\\{subfolder}KID{KID}_{Pread}dBm__TmK{T}_avgpulse_info.csv',
+        f'{Chipnum}\\Pulse\\{wvl}nm\\{subfolder}KID{KID}_{Pread}dBm__TmK{T}_avgpulse_{coord}_info.csv',
         delimiter=',', skip_header=1).T
     return strms.astype(int), locs.astype(int), proms
 
