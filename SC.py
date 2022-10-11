@@ -87,7 +87,7 @@ class Superconductor(object):
 class PEC(Superconductor):
     def __init__(self, Tc=300, rhon=0):
         super().__init__(
-            'PEC', 300, np.nan, np.nan, rhon, np.nan, np.nan, np.nan, np.nan)
+            'PEC', Tc, np.nan, np.nan, rhon, np.nan, np.nan, np.nan, np.nan)
 
 
 class Al(Superconductor):
@@ -104,22 +104,23 @@ class bTa(Superconductor):
         Sapphire.
         tpb is calculated with Kaplan formula for tph0, with N and N(0) from 
         Abadias2019.
+        tau0 is calculated from the power law GR noise lifetimes in LT192,
+            CPWs with tau0 = 4.2 tau_GR(Tc) (see Kaplan1979)
         The hardcoded arguments for the __init__() method, are standard 
         constants for Ta from Abadias2019 
         and Magnuson2019"""
         super().__init__(
-            "bTa", Tc, 266, 3.07e4, rhon, np.nan, np.nan, 1.78e-3, 0.015e-3
+            "bTa", Tc, 266, 3.07e4, rhon, np.nan, np.nan, 81e-3, 0.015e-3
         )
 
 
 class aTa(Superconductor):
     def __init__(self, Tc=4.4, rhon=8.8):
-        """ The default escape time is calculated with Kaplan1979 for Ta on Sapphire.
-        The hardcoded arguments for the
+        """ The hardcoded arguments for the
         __init__() method, are standard constants for Ta from Abadia2019 
         and Magnuson2019 """
         super().__init__(
-            "aTa", Tc, 250, 5.70e4, rhon, 9.5e6, 0.24e6, 1.78e-3, 0.0227e-3,
+            "aTa", Tc, 258, 5.70e4, rhon, 9.5e6, 0.24e6, 1.78e-3, 0.0227e-3,
         )
 
 
@@ -143,7 +144,7 @@ class Sheet(object):
     '''A superconducting sheet with a certain thickness d and phonon escape
     time tesc'''
 
-    def __init__(self, SC, d, tesc=0, tescerr=0):
+    def __init__(self, SC, d, tesc=1e-12, tescerr=0):
         self.SC = SC
         self.d = d
         self.tesc = tesc
@@ -173,7 +174,7 @@ class Sheet(object):
 class Vol(Sheet):
     '''A superconducting sheet of volume V, width w and lenght l'''
 
-    def __init__(self, SC, d, V, w=np.nan, l=np.nan, tesc=0, tescerr=0):
+    def __init__(self, SC, d, V, w=np.nan, l=np.nan, tesc=1e-12, tescerr=0):
         super().__init__(SC, d, tesc, tescerr)
         self.V = V
         self.w = w

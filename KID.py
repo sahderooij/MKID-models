@@ -34,6 +34,7 @@ class KID(object):
         """Attributes are defined here. hw0 and kbT0 give the resonance frequency
         at temperature T0, both in µeV, from which we linearize to calculate the 
         new resonance frequencies."""
+        self.SCvol = SCvol
         self.SC = SCvol.SC
         self.d = SCvol.d
         self.V = SCvol.V
@@ -56,7 +57,7 @@ class KID(object):
     def hwread(self):
         """Gives the read frequency such that it is equal to the resonance
         frequency."""
-        return kidcalc.hwread(self.hw0, self.kbT0, self.ak, self.kbT, self.D_0, self.SC)
+        return kidcalc.hwread(self.hw0, self.kbT0, self.ak, self.kbT, self.D_0, self.SCvol)
 
     @property
     def Nqp_0(self):
@@ -65,7 +66,7 @@ class KID(object):
     @property
     def tqp_0(self):
         return (
-            self.SC.V
+            self.V
             * self.SC.t0
             * self.SC.N0
             * self.SC.kbTc ** 3
@@ -145,8 +146,8 @@ class KID(object):
         )  # µs^-1*um^3 (From Wilson2004 or 2.29)
         G_B = 1 / self.SC.tpb  # µs^-1 (From chap8)
         G_es = 1 / self.tesc  # µs^-1 (From chap8)
-        N_w0 = R * self.Nqp_0 ** 2 * self.SC.tpb / (2 * self.SC.V)  # arb.
-        return [R, self.SC.V, G_B, G_es, N_w0]
+        N_w0 = R * self.Nqp_0 ** 2 * self.SC.tpb / (2 * self.V)  # arb.
+        return [R, self.V, G_B, G_es, N_w0]
 
     def calc_Nqpevol(self, dNqp, tStop=None, tInc=None):
         if tStop is None:

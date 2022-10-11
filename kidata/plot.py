@@ -72,9 +72,9 @@ def spec(
 ):
     """Plots PSDs of multiple KIDs, read powers and temperatures (indicated by color). Every KID has a new figure, which is returned if only one KID is plotted.
     lvlcomp specifies how the noise levels should be compensated (will be a different function in the future). 
-    Use Resp to divide by responsivity and obtain quasiparticle fluctuations.
-    Use Resptres to compensate for the factor (1+(omega*taures)^2) and get the quasiparticle fluctuations.
-    plttres will plot arrow at the frequencies corresponding to the resonator ring time."""
+        Use Resp to divide by responsivity and obtain quasiparticle fluctuations.
+        Use Resptres to compensate for the factor (1+(omega*taures)^2) and get the quasiparticle fluctuations.
+    plttres will plot an arrow at the frequencies corresponding to the resonator ring time."""
     TDparam = io.get_grTDparam(Chipnum)
     if suboffres:
         TDparamoffres = io.get_grTDparam(Chipnum, offres=True)
@@ -121,7 +121,7 @@ def spec(
 
             Temp = Temp[np.logical_and(Temp < Tminmax[1], Temp > Tminmax[0])]
             if cmap is None or norm is None:
-                cmap = matplotlib.cm.get_cmap("summer")
+                cmap = matplotlib.cm.get_cmap("viridis")
                 norm = matplotlib.colors.Normalize(Temp.min(), Temp.max())
             if clbar:
                 clb = plt.colorbar(

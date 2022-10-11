@@ -22,7 +22,7 @@ def calc_pulseavg(
     filelocation: the folder that contains .bin files.
     KIDPrT: array that has KID, Pread and T in columns of the files that 
         need to be processed. Default is all .bin files in folder.
-    pulse_len: (int) amount of points that will be taken from each pulse
+    pulse_len: (int) total amount of points that will be taken for each pulse, incl. prepulse noise
     start: desired amount of noise points before the pulse
     minmax_prom: prominence spread of the desired peaks 
         (run selected_proms to determine these, asks if not given) 
@@ -186,21 +186,23 @@ def select_proms(filelocation, KIDPrT=None, pulse_len=2e3, nstream=5, coord='amp
                     elif coord == 'RX':
                         amp, phase = to_RX(data)
                     std = np.std(phase)
-                    multiplier = 4
-                    peaks, peakshight = find_peaks(
-                        phase, prominence=multiplier * std)
-                    prominences = peakshight["prominences"]
-                    while len(peaks) < 100:
-                        multiplier -= 1
-                        peaks, peakshight = find_peaks(
-                            phase, prominence=multiplier * std
-                        )
+                    # multiplier = 4
+                    peaks, peakheight = find_peaks(
+                        phase, prominence=np.percentile(phase, 99.95))
+                    prominences = peakheight["prominences"]
+#                     maxpulses = len(phase)/pulse_len
+#                     minpulses = 100
+#                     while len(peaks) < minpulses:
+#                         multiplier -= 1
+#                         peaks, peakheight = find_peaks(
+#                             phase, prominence=multiplier * std
+#                         )
 
-                    while len(peaks) > len(phase)/pulse_len*.5:
-                        multiplier += 0.2
-                        mask = (prominences) > (multiplier * std)
-                        peaks = peaks[mask]
-                        prominences = prominences[mask]
+#                     while len(peaks) > maxpulses/2:
+#                         multiplier += 0.2
+#                         mask = (prominences) > (multiplier * std)
+#                         peaks = peaks[mask]
+#                         prominences = prominences[mask]
                     total_prominences = np.append(
                         total_prominences, prominences, 0)
 
@@ -231,8 +233,8 @@ def findpeaks(
     data = np.array(data)
 
     # retrieve all the peaks in the timestream
-    peaks, peakshight = find_peaks(data, prominence=prom)
-    prominences = peakshight["prominences"]
+    peaks, peakheight = find_peaks(data, prominence=prom)
+    prominences = peakheight["prominences"]
     threshold = len(data) / (2 * points)
 
     # variable to ensure you don't include too many peaks so the dist checks removes everything

@@ -300,21 +300,28 @@ def S21res(f, fr, Ql, Qc_real, Qc_imag=0):
         1 + 2j * Ql * (f / fr - 1)
     )
 
-def S21fit(freq, cmplS21data, approxf0=None, wnd=None, fitmismatch=True, plot=False):
-    if (approxf0 is not None) or (wnd is not None):
-        f, data = getKIDdip(freq, cmplS21data, approxf0, wnd)
-    else:
-        f, data = freq, cmplS21data
-
+def guessfrQlQc(f, data):
     f0guess = f[np.abs(data).argmin()]
-    # aguess = (np.abs(data[0]) + np.abs(data[-1])) / 2
-    #guess Ql as f0/df(FWHM)
     HM = (1 - np.abs(data).min()) / 2
     Fl = f[f<f0guess][np.abs(np.abs(data[f<f0guess]) - HM).argmin()]
     Fr = f[f>f0guess][np.abs(np.abs(data[f>f0guess]) - HM).argmin()]
     FWHM = Fr - Fl
     Qlguess = f0guess/FWHM
     Qc_realguess = Qlguess / (1 - np.abs(data[np.abs(data).argmin()]))
+    return f0guess, Qlguess, Qc_realguess
+
+
+def S21fit(freq, cmplS21data, approxf0=None, wnd=None, plot=False):
+    if (approxf0 is not None) or (wnd is not None):
+        f, data = getKIDdip(freq, cmplS21data, approxf0, wnd)
+    else:
+        f, data = freq, cmplS21data
+
+
+    # aguess = (np.abs(data[0]) + np.abs(data[-1])) / 2
+    #guess Ql as f0/df(FWHM)
+    f0guess, Qlguess, Qc_realguess = guessfrQlQc(f, data)
+
     phase = np.unwrap(np.angle(data))
     # alphaguess = phase[[0, -1]].mean()
     # tauguess = (phase[-1] - phase[0]) / (2 * np.pi * (f[0] - f[-1]))
@@ -390,3 +397,26 @@ def S21fit(freq, cmplS21data, approxf0=None, wnd=None, fitmismatch=True, plot=Fa
         fig.tight_layout()
 
     return f0, Ql, np.abs(Qc), Qi
+
+def fit_dB(freq, S21dB, plot=False):
+    data = 10**(S21dB/20)
+    linfit = np.polyfit([freq[0], freq[-1]], [data[0], data[-1]], 1)
+    normdata = data/np.polyval(linfit, freq)
+    
+    def absfit(f, fr, Ql, Qc_real):
+        return np.abs(S21res(f, fr, Ql, Qc_real))
+    
+    fr0, Ql0, Qc0 = guessfrQlQc(freq, normdata)
+    fit = curve_fit(absfit, freq, normdata, 
+                   p0=(fr0, Ql0, Qc0))
+    fres = fit[0][0]
+    Ql = fit[0][1]
+    Qc = fit[0][2]
+    Qi = (1/Ql - 1/Qc)**(-1)
+    if plot:
+        plt.plot(freq, S21dB)
+        plt.plot(freq, 20*np.log10(absfit(freq, *fit[0])*np.polyval(linfit, freq)),
+                 label=f'fres={fres:.3f}, \nQl={Ql:.0f} \nQc={Qc:.0f} \nQi={Qi:.0f}')
+        plt.legend()
+    
+    

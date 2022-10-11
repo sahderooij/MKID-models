@@ -88,7 +88,7 @@ def D(kbT, SC):
 def nqp(kbT, D, SC):
     """Thermal average quasiparticle denisty. It can handle arrays 
     and uses a low temperature approximation, if kbT < Delta/20."""
-    if (kbT < D / 20).all():
+    if np.array(kbT < D / 20).all():
         return 2 * SC.N0 * np.sqrt(2 * np.pi * kbT * D) * np.exp(-D / kbT)
     else:
 
@@ -122,11 +122,9 @@ def kbTeff(nqp, SC):
         kbTspl = interpolate.splrep(Ddata[2, :], Ddata[0, :])
         return interpolate.splev(nqp, kbTspl)
     else:
-
-        def minfunc(kbT, Nqp, SC):
+        def minfunc(kbT, nqp, SC):
             Dt = D(kbT, SC)
             return np.abs(nqp(kbT, Dt, SC) - nqp)
-
         res = minisc(
             minfunc,
             bounds=(0, 0.9 * SC.kbTc),
@@ -174,22 +172,22 @@ def S21(Qi, Qc, hwread, dhw, hwres):
     return (Q / Qi + 2j * Q * dhw / hwres) / (1 + 2j * Q * dhw / hwres)
 
 
-def hwread(hw0, kbT0, ak, kbT, D, SC):
+def hwread(hw0, kbT0, ak, kbT, D, SCvol):
     """Calculates at which frequency, one probes at resonance. 
     This must be done iteratively, as the resonance frequency is 
     dependent on the complex conductivity, which in turn depends on the
     read frequency."""
-    D_0 = D(kbT0, SC)
-    s20 = cinduct(hw0, D_0, kbT0)[1]
+    # D_0 = D(kbT0, SC)
+    s20 = cinduct(hw0, D, kbT0)[1]
 
-    def minfuc(hw, hw0, s20, ak, kbT, D, SC):
+    def minfuc(hw, hw0, s20, ak, kbT, D, SCvol):
         s1, s2 = cinduct(hw, D, kbT)
-        return np.abs(hwres(s2, hw0, s20, ak, kbT, D, SC) - hw)
+        return np.abs(hwres(s2, hw0, s20, ak, kbT, D, SCvol) - hw)
 
     res = minisc(
         minfuc,
         bracket=(0.5 * hw0, hw0, 2 * hw0),
-        args=(hw0, s20, ak, kbT, D, SC),
+        args=(hw0, s20, ak, kbT, D, SCvol),
         method="brent",
         options={"xtol": 1e-21},
     )

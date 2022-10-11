@@ -490,15 +490,15 @@ def fit_nonexppulse(
     R = fit[0][0] / (1 - fit[0][0]) / (fit[0][1] * tss)
 
     if plot:
-        fig, axs = plt.subplots(2, 1)
+        fig, axs = plt.subplots(2, 1, figsize=(5, 7), sharex=True)
         for ax in axs:
             ax.plot(t, pulse, label='data')
-            ax.plot(t2, fitfun(t2, *fit[0]), 'r', label='Non exp. fit')
+            ax.plot(t2, fitfun(t2, *fit[0]), 'r', label='1/t + exp. fit')
             ax.plot(t[pulsestart:], fitfun(t[pulsestart:], *fit[0]),
                  'r--')
             tssmask = (t > tsstfit[0]) & (t < tsstfit[1])
             ax.plot(t[tssmask], fitfun(t[tssmask], *fit[0]), 'r',
-                    linewidth=3., label='$\\tau_{ss}$ fit-range')
+                    linewidth=4., label=f'$\\tau_{{ss}}$ fit-range\n $\\tau_{{ss}}$={tss:.0f} µs')
         axs[0].set_yscale("log")
         axs[0].legend()
 
@@ -587,8 +587,8 @@ def tesc(
     Uses data at Pread (default max), and temperatures between minTemp,maxTemp
     (default (200,400)). Only lifetimes between taunonkaplan and taures, and with
     a relative error threshold of relerrthrs are considered.
-    The remaining lifetimes, tesc is calculated and averaged. The error (optional return) 
-    is the variance of the remaining lifetimes. If this fails, defaulttesc is returned."""
+    From the remaining lifetimes, tesc is calculated and averaged. The error (optional return) 
+    is the variance of the tesc values. If this fails, defaulttesc is returned."""
 
     TDparam = io.get_grTDparam(Chipnum)
     Pread = _selectPread(usePread, io.get_grPread(TDparam, KIDnum))[0]

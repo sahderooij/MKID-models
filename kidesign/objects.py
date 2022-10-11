@@ -3,6 +3,7 @@ sys.path.insert(1, '../../Coding')
 import SC
 
 import numpy as np
+import matplotlib.pyplot as plt
 import copy
 import scipy.special as sp
 import scipy.constants as const
@@ -23,7 +24,7 @@ from scipy.optimize import minimize_scalar
 
 class CPW(object):
     """Class to calculate CPW properties, such as vph, Z0 and ak.
-    Give S,W,d and l in µm, and Lk in pH/sq"""
+    Give S,W and l in µm"""
 
     def __init__(self, SCsheet, S, W, eeff, l=1):
         self.SCsheet = SCsheet
@@ -150,7 +151,6 @@ class hyCPW(CPW):
 
 class Coupler(object):
     '''Object that represents the capcitive coupler from (quarterwave) KID to TL'''
-
     def __init__(self, Qc, f0, Ztl, Zkid):
         self.Qc = Qc
         self.f0 = f0
@@ -163,9 +163,95 @@ class Coupler(object):
 
     def ABCD(self, f):
         return np.array([[1, 1/(1j*2*np.pi*f*self.C)], [0, 1]])
+    
 
+class KID(object):
+    '''Class to make a CPW KID out of a single CPW line'''
+    def __init__(self, f0, Qc, CPW, Ztl):
+        self.f0 = f0
+        self.Qc = Qc
+        self.CPW = CPW
+        self.Ztl = Ztl
+    
+    @property
+    def Coupler(self):
+        return Coupler(self.Qc, self.f0, self.Ztl, self.CPW.Z0)
+    
+    @property
+    def SensSC(self):
+        return self.CPW.SCsheet.SC
+    
+    @SensSC.setter
+    def SensSC(self, SC):
+        self.CPW.SCsheet.SC = SC
+    
+    @property
+    def fres_simple(self):
+        return 1/(4*np.sqrt(self.CPW.L*self.CPW.C))
+    
+    def fres(self, plot=False):
+        '''Find the resonance frequency by calculating the input impedance
+        of the whole hybrid KID (Coupler, CPW, IndCPW) via ABCD matrices and equating
+        the imaginary part to 0.'''
 
-class hyKID(object):
+        def min_fun(f):
+            (A, B), (C, D) = self.ABCD(f)
+            return np.abs(np.imag(B / D))
+        res = minimize_scalar(min_fun,
+                              bounds=(
+                                  self.fres_simple *
+                                  np.array([1/2,
+                                            1])
+                              ), method='bounded', options={'xatol': 1e-5})
+        if plot:
+            plt.figure()
+            fs = np.linspace(.5, 2, 1000)*self.fres_simple
+            A, B, C, D = np.zeros((4, len(fs)), dtype='complex')
+            for i, f in enumerate(fs):
+                (A[i], B[i]), (C[i], D[i]) = self.ABCD(f)
+            plt.plot(fs, np.abs(np.imag(B/D)))
+            plt.axvline(self.fres_simple, linestyle='--', color='r', label='fres_simple')
+            plt.axvline(res.x, linestyle='--', color='k', label='fres')
+            plt.axvline(self.f0, linestyle='--', color='g', label='f0')
+            plt.yscale('log')
+            plt.legend()
+        return res.x
+    
+    def ak(self, plot=False):
+        '''Calculate the kinetic induction fraction, by temporarily changing
+        the CPW line with PEC, and using the formula:
+        ak = 1 - (fres/fres,PEC)^2'''
+        Qc = self.Qc
+        SuCo = copy.copy(self.SensSC)
+        self.Qc = 1e5  # set Qc to high, to mitigate coupling fres shifts
+        fres = self.fres(plot=plot)  # get fres
+        if plot:
+            plt.title('fres')
+        self.SensSC = SC.PEC()   # switch to PEC
+        fresPEC = self.fres(plot=plot)  # get fres,PEC
+        if plot:
+            plt.title('fres, PEC')
+        # set parameters back
+        self.SensSC = SuCo
+        self.Qc = Qc
+        return 1 - (fres/fresPEC)**2
+    
+    def set_CPWlen(self):
+        '''Iteratively calculate the resonance frequency and adjust the
+        lenght of the Capacitive CPW length to reach f0'''
+        def f0diff(CapLen, self):
+            self.CPW.l = CapLen
+            return np.abs(self.f0 - self.fres())
+        res = minimize_scalar(f0diff, args=(self,))
+        self.CPW.l = res.x
+        return self.CPW.l
+    
+    def ABCD(self, f):
+        return self.Coupler.ABCD(f) @ self.CPW.ABCD(f)
+        
+    
+
+class hyKID(KID):
     '''Hybrid KID object, consisting of a coupler to transmission line with Ztl,
     Capacitive CPW, Inductive CPW, which is shorted (quarter wave). 
     We fix the design resonance frequency (f0) and coupling quality factor (Qc).
@@ -173,94 +259,69 @@ class hyKID(object):
     the method calc_CapL calculates the length needed for the capacitive part and
     set that to that object.'''
 
-    def __init__(self, Qc, f0, CapCPW, IndCPW, Ztl):
-        self.f0 = f0
-        self.Qc = Qc
-        self.CapCPW = CapCPW
+    def __init__(self, f0, Qc, CapCPW, IndCPW, Ztl):
+        KID.__init__(self, f0, Qc, CapCPW, Ztl)
         self.IndCPW = IndCPW
-        self.Coupler = Coupler(Qc, f0, Ztl, CapCPW.Z0)
-
+    
+    @property
+    def SensSC(self):
+        return self.IndCPW.cSCsheet.SC
+    
+    @SensSC.setter
+    def SensSC(self, SC):
+        self.IndCPW.cSCsheet.SC = SC
+        
     @property
     def fres_simple(self):
-        '''Calculate the approximate resonance frequency with 
-        standard 1/4sqrt(LC) formula, for two (lossless) LC circuits in series,
-        as derived from ABCD materices (without coupler).'''
-        gamma = (self.IndCPW.C * self.IndCPW.L +
-                 self.CapCPW.C * self.CapCPW.L + 
-                 self.IndCPW.L * self.CapCPW.C)
-        delta = self.IndCPW.C * self.IndCPW.L * self.CapCPW.C * self.CapCPW.L
-        return 1/(4*np.sqrt(
-            gamma/2 + np.sqrt(gamma**2/4 - delta)
-        ))
-
-    @property
-    def fres(self):
-        '''Find the resonance frequency by calculating the input impedance
-        of the whole hybrid KID (Coupler, CapCPW, IndCPW) via ABCD matrices and equating
-        the imaginary part to 0.'''
-
-        def min_fun(f):
-            (A, B), (C, D) = (self.Coupler.ABCD(f) @ self.CapCPW.ABCD(f) @
-                              self.IndCPW.ABCD(f))
-            return np.abs(np.imag(B / D))
-        res = minimize_scalar(min_fun,
-                              bounds=(
-                                  self.fres_simple *
-                                  np.array([1 - 5 / np.sqrt(np.pi * self.Qc),
-                                            1 + 5 / np.sqrt(np.pi * self.Qc)])
-                              ), method='bounded', options={'xatol': 1e-5})
-        return res.x
-
-    @property
-    def ak(self):
-        '''Calculate the kinetic induction fraction, by temporarily changing
-        the inductive CPW central line with PEC, and using the formula:
-        ak = 1 - (fres/fres,PEC)^2'''
-        # save current parameters
-        Qc = self.Qc
-        IndSC = copy.copy(self.IndCPW.cSCsheet.SC)
-        self.Qc = 1e10  # set Qc to high, to mitigate coupling fres shifts
-        fres = self.fres  # get fres
-        self.IndCPW.cSCsheet.SC = SC.PEC()   # switch to PEC
-        fresPEC = self.fres  # get fres,PEC
-        # set parameters back
-        self.IndCPW.cSCsheet.SC = IndSC
-        self.Qc = Qc
-        return 1 - (fres/fresPEC)**2
-
-    def set_CapLen(self):
-        '''Iteratively calculate the resonance frequency and adjust the
-        lenght of the Capacitive CPW length to reach f0'''
-        def f0diff(CapLen, self):
-            self.CapCPW.l = CapLen
-            return np.abs(self.f0 - self.fres)
-        res = minimize_scalar(f0diff, args=(self,))
-        self.CapCPW.l = res.x
-        return self.CapCPW.l
-
-
-class KID(object):
-    """Object to calculate the input impedance of a KID 
-    (coupler + transmission line).
-    f0 in Hz, Z0 in Ohm."""
-
-    def __init__(self, fres, Qc, Qi, Z0):
-        self.fres = fres
-        self.Qc = Qc
-        self.Qi = Qi
-        self.Z0 = Z0
-
-    def Zin(self, f):
-        # from pag.76, eq. (3.18) of PdV's thesis
-        dx = (f - self.fres) / self.fres
-        return self.Z0 * (
-            (
-                2 * self.Qi * np.sqrt(self.Qc / np.pi) * dx
-                - 1j * np.sqrt(1 / (np.pi * self.Qc))
-            )
-            / (1 + 2j * self.Qi * (dx - np.sqrt(1 / (np.pi * self.Qc))))
-        )
-
+        '''Calculate the approximate resonance frequency 
+        for a (lossless) LC circuit, with the sum of the total inductances and
+        capacitances of the individual CPW line.'''
+        return 1/(4*np.sqrt((self.CPW.L + self.IndCPW.L)*(self.CPW.C + self.IndCPW.C)))
+    
     def ABCD(self, f):
-        Zin = self.calc_Zin(f)
-        return np.array([[1, 0], [1 / Zin, 1]])
+        return self.Coupler.ABCD(f) @ self.CPW.ABCD(f) @ self.IndCPW.ABCD(f)
+    
+
+class THzKID(hyKID):
+    '''This is the same as a hybrid KID, but with an extra CPW section (called here THzCoupCPW)
+    that connects to the antenna/filter/THz coupler.'''
+    def __init__(self, Qc, f0, CPW, IndCPW, THzCoupCPW, Ztl):
+        hyKID.__init__(self, Qc, f0, CPW, IndCPW, Ztl)
+        self.THzCoupCPW = THzCoupCPW
+        
+    @property
+    def fres_simple(self):
+        return 1/(4*np.sqrt((self.CPW.L + self.IndCPW.L + self.THzCoupCPW.L)*
+                            (self.CPW.C + self.IndCPW.C + self.THzCoupCPW.C)))   
+    
+    def ABCD(self, f):
+        return (self.Coupler.ABCD(f) @ self.CPW.ABCD(f) @ 
+                self.IndCPW.ABCD(f) @ self.THzCoupCPW.ABCD(f))
+
+
+
+# class KID(object):
+#     """Object to calculate the input impedance of a KID 
+#     (coupler + transmission line).
+#     f0 in Hz, Z0 in Ohm."""
+
+#     def __init__(self, fres, Qc, Qi, Z0):
+#         self.fres = fres
+#         self.Qc = Qc
+#         self.Qi = Qi
+#         self.Z0 = Z0
+
+#     def Zin(self, f):
+#         # from pag.76, eq. (3.18) of PdV's thesis
+#         dx = (f - self.fres) / self.fres
+#         return self.Z0 * (
+#             (
+#                 2 * self.Qi * np.sqrt(self.Qc / np.pi) * dx
+#                 - 1j * np.sqrt(1 / (np.pi * self.Qc))
+#             )
+#             / (1 + 2j * self.Qi * (dx - np.sqrt(1 / (np.pi * self.Qc))))
+#         )
+
+#     def ABCD(self, f):
+#         Zin = self.calc_Zin(f)
+#         return np.array([[1, 0], [1 / Zin, 1]])

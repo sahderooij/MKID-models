@@ -338,8 +338,10 @@ def get_grdata(TDparam, KIDnum, Pread, Temp, spec='cross'):
         SPR = TDparam["SPRrealneg"][0, ind][Preadind, Tempind][0, 0][0]
     elif spec == 'crosspos':
         SPR = TDparam["SPRrealpos"][0, ind][Preadind, Tempind][0, 0][0]
-    elif spec == 'crossimag':
+    elif spec == 'crossimagneg':
         SPR = TDparam["SPRimagneg"][0, ind][Preadind, Tempind][0, 0][0]
+    elif spec == 'crossimagpos':
+        SPR = TDparam["SPRimagpos"][0, ind][Preadind, Tempind][0, 0][0]
     elif spec == 'phase':
         SPR = TDparam["SPPtotal"][0, ind][Preadind, Tempind][0, 0][0]
     elif spec == 'amp':
