@@ -11,6 +11,8 @@ import scipy.constants as const
 from scipy.optimize import minimize_scalar as minisc
 import warnings
 
+import SCtheory.tau, SCtheory.noise
+
 
 def f(E, kbT):
     """The Fermi-Dirac distribution."""
@@ -87,8 +89,8 @@ def D(kbT, SC):
 
 def nqp(kbT, D, SC):
     """Thermal average quasiparticle denisty. It can handle arrays 
-    and uses a low temperature approximation, if kbT < Delta/20."""
-    if np.array(kbT < D / 20).all():
+    and uses a low temperature approximation, if kbT < Delta/100."""
+    if np.array(kbT < D / 100).all():
         return 2 * SC.N0 * np.sqrt(2 * np.pi * kbT * D) * np.exp(-D / kbT)
     else:
 
@@ -119,7 +121,8 @@ def kbTeff(nqp, SC):
    quasiparticle density."""
     Ddata = SC.Ddata
     if Ddata is not None:
-        kbTspl = interpolate.splrep(Ddata[2, :], Ddata[0, :])
+        kbTspl = interpolate.splrep(Ddata[2, :], Ddata[0, :],
+                                   s=0, k=1)
         return interpolate.splev(nqp, kbTspl)
     else:
         def minfunc(kbT, nqp, SC):
@@ -134,6 +137,18 @@ def kbTeff(nqp, SC):
         )
         if res.success:
             return res.x
+        
+        
+def Zs(hw, kbT, SCsheet):
+    '''The surface impendance of a superconducting sheet with arbitrary 
+    thickness. Unit is µOhm'''
+    D_ = D(kbT, SCsheet.SC)
+    s1, s2 = cinduct(hw, D_, kbT) / SCsheet.SC.rhon
+    omega = hw / (const.hbar * 1e12 / const.e)
+    return (np.sqrt(1j * const.mu_0 * 1e6 * omega / (s1 - 1j * s2))
+            / np.tanh(np.sqrt(1j*omega*const.mu_0*1e6 * (s1 - 1j * s2)) * SCsheet.d)
+           )
+
 
 
 def beta(kbT, D, SCsheet):
@@ -183,7 +198,7 @@ def hwread(hw0, kbT0, ak, kbT, D, SCvol):
     def minfuc(hw, hw0, s20, ak, kbT, D, SCvol):
         s1, s2 = cinduct(hw, D, kbT)
         return np.abs(hwres(s2, hw0, s20, ak, kbT, D, SCvol) - hw)
-
+   
     res = minisc(
         minfuc,
         bracket=(0.5 * hw0, hw0, 2 * hw0),
@@ -216,63 +231,7 @@ def calc_Nwsg(kbT, D, e, V):
     return integrate.quad(integrand, e + D, 2 * D, args=(kbT, V))[0]
 
 
-def tau_kaplan(T, SCsheet):
-    """Calculates the apparent quasiparticle lifetime from Kaplan. 
-    See PdV PhD eq. (2.29)"""
-    SC = SCsheet.SC
-    D_ = D(const.Boltzmann / const.e * 1e6 * T, SC)
-    nqp_ = nqp(const.Boltzmann / const.e * 1e6 * T, D_, SC)
-    taukaplan = (
-        SC.t0 * SC.N0 * SC.kbTc ** 3 / (4 * nqp_ * D_ ** 2) *
-        (1 + SCsheet.tesc / SC.tpb)
-    )
-    return taukaplan
 
-
-def tauqp_kaplan(kbT, SC):
-    """Calculates the intrinsic quasiparticle lifetime w.r.t recombination at E=Delta
-    from Kaplan1976 and uses the intral form s.t. it holds for all temperatures."""
-    D_ = D(kbT, SC)
-
-    def integrand(E, D, kbT):
-        return (
-            E ** 2
-            * (E - D)
-            / np.sqrt((E - D) ** 2 - D ** 2)
-            * (1 + D ** 2 / (D * (E - D)))
-            * (n(E, kbT) + 1)
-            * f(E - D, kbT)
-        )
-
-    return (
-        SC.t0
-        * SC.kbTc ** 3
-        * (1 - f(D_, kbT))
-        / integrate.quad(integrand, 2 * D_, np.inf, args=(D_, kbT))[0]
-    )
-
-
-def tauscat_kaplan(kbT, SC):
-    """Calculates the intrinsic quasiparticle lifetime w.r.t scattering at E=Delta
-    from Kaplan1976 and uses the intral form s.t. it holds for all temperatures."""
-    D_ = D(kbT, SC)
-
-    def integrand(E, D, kbT):
-        return (
-            E ** 2
-            * (E + D)
-            / np.sqrt((E + D) ** 2 - D ** 2)
-            * (1 - D ** 2 / (D * (E + D)))
-            * n(E, kbT)
-            * (1 - f(E + D, kbT))
-        )
-
-    return (
-        SC.t0
-        * SC.kbTc ** 3
-        * (1 - f(D_, kbT))
-        / integrate.quad(integrand, 0, np.inf, args=(D_, kbT))[0]
-    )
 
 
 def kbTbeff(tqpstar, SCsheet, plot=False):
@@ -288,15 +247,6 @@ def kbTbeff(tqpstar, SCsheet, plot=False):
         / 2
     )
     return kbTeff(nqp_0, SC)
-
-
-def tesc(kbT, tqpstar, SC):
-    """Calculates the phonon escape time, based on tqp* via Kaplan. Times are in µs."""
-    D_ = D(kbT, SC)
-    nqp_ = nqp(kbT, D_, SC)
-    return SC.tpb * (
-        (4 * tqpstar * nqp_ * D_ ** 2) / (SC.t0 * SC.N0 * SC.kbTc ** 3) - 1
-    )
 
 
 def nqpfromtau(tau, SCsheet):

@@ -114,7 +114,7 @@ def calc_pulseavg(
                     std_amp = np.std(all_pulses_amp, 0)
                 else:
                     warnings.warn(
-                        (f"KID{KID}, {temp} mK, {Pread} dBm: No pulses made it"
+                        (f"KID{KID}, {temp} mK, {Pread} dBm: No pulses made it "
                          "through filtering, please check filters"))
                     avg_pulse_phase = [0]
                     std_phase = [0]
@@ -422,9 +422,9 @@ def calctres(info_loc):
     return tres
 
 
-def view_pulses(Chipnum, KID, Pread, T, wvl, pulse_len=500, start=100,
+def view_pulses(Chipnum, KID, Pread, T, wvl, coord='ampphase', pulse_len=500, start=100,
                 logscale=True, movavg=False, wnd=9, suboff=False):
-    strms, locs, proms = io.get_avgpulseinfo(Chipnum, KID, Pread, T, wvl)
+    strms, locs, proms = io.get_avgpulseinfo(Chipnum, KID, Pread, T, wvl, coord=coord)
     plt.ion()
 
     def show_pulse(pulse):
@@ -439,9 +439,16 @@ def view_pulses(Chipnum, KID, Pread, T, wvl, pulse_len=500, start=100,
 
         data = io.get_bin(filelocation,
                           KID, Pread, T, strm)
-        amp, phase = to_ampphase(data)
-        phpulse = phase[int(loc-start):int(loc+pulse_len-start)]
-        amppulse = 1-amp[int(loc-start):int(loc+pulse_len-start)]
+        if coord == 'ampphase':
+            amp, phase = to_ampphase(data)
+            phpulse = phase[int(loc-start):int(loc+pulse_len-start)]
+            amppulse = 1-amp[int(loc-start):int(loc+pulse_len-start)]
+        elif coord == 'RX':
+            R, X = to_RX(data)
+            phpulse = X[int(loc-start):int(loc+pulse_len-start)]
+            amppulse = R[int(loc-start):int(loc+pulse_len-start)]
+        else:
+            raise ValueError('coord must be ampphase or RX')
         t = np.arange(len(phpulse)) - start
         if suboff:
             phpulse -= np.mean(phpulse[0:start - 5*calctres(data_info)])
@@ -449,8 +456,8 @@ def view_pulses(Chipnum, KID, Pread, T, wvl, pulse_len=500, start=100,
         if movavg:
             phpulse = savgol_filter(phpulse, wnd, 0)
             amppulse = savgol_filter(amppulse, wnd, 0)
-        plt.plot(t, phpulse, label='phase')
-        plt.plot(t, amppulse, label='1-amp')
+        plt.plot(t, phpulse, label='phase' if coord == 'ampphase' else 'X')
+        plt.plot(t, amppulse, label='1-amp' if coord == 'ampphase' else 'R')
         plt.legend()
         if logscale:
             plt.yscale('log')

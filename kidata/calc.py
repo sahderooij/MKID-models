@@ -9,23 +9,24 @@ from scipy.special import k0, i0
 from scipy import interpolate
 from scipy.signal import deconvolve
 
-import kidcalc
+import SCtheory as SCth
 import SC as SuperCond
 
 from kidata import io
 from kidata.plot import _selectPread
 
+
 # NOTE: all units are in 'micro': µeV, µm, µs etc.
-
-
-def ak(S21data, SC=None, plot=False, reterr=False, method="df", Tmin= .25):
+def ak(S21data, SC=None, plot=False, reterr=False, method="df_nonlin", Tmin=None):
     """Calculates the kinetic induction fraction, based on Goa2008, PhD Thesis. 
+    Note: this only works for small ak!
     Arguments:
     S21data -- the content of the .csv from the S21-analysis. 
     SC -- Superconductor object, from SC module, default: Al
     plot -- boolean to plot the fit over temperature.
     reterr -- boolean to return fitting error.
     method -- either df or Qi, which is fitted linearly over temperature.
+    Tmin -- the temperature from which to start the fit. Default is 1/5 of Tc
     
     Returns:
     ak 
@@ -33,153 +34,82 @@ def ak(S21data, SC=None, plot=False, reterr=False, method="df", Tmin= .25):
 
     if SC is None:
         SC = SuperCond.Al(Tc=S21data[0, 21])
+    if Tmin is None:
+        Tmin = SC.kbTc / const.Boltzmann * const.e * 1e-6 / 5
+        #This only works for high temperature points, as then sigma needs to change signaficantly
 
     # Extract relevant data
     hw = S21data[:, 5] * const.Planck / const.e * 1e6  # µeV
     kbT = S21data[:, 1] * const.Boltzmann / const.e * 1e6  # µeV
+    Qi = S21data[:, 4]
+    
     hw0 = hw[0]
-
+    
     # define y to fit:
     if method == "df":
         y = (hw - hw0) / hw0
     elif method == "Qi":
-        y = 1 / S21data[:, 4] - 1 / S21data[0, 4]
-
-    # Mask the double measured temperatures, and only fit from 250 mK
-    mask1 = np.zeros(len(y), dtype="bool")
-    mask1[np.unique(np.round(S21data[:, 1], decimals=2), return_index=True)[1]] = True
-    mask = np.logical_and(mask1, (kbT >= Tmin * const.Boltzmann / const.e * 1e6))
-
-    if mask.sum() > 3:
-        y = y[mask]
-    else:
-        warnings.warn("Not enough high temperature S21data, taking the last 10 points")
-        y = y[mask1][-10:]
+        y = 1 / Qi - 1 / Qi[0]
+    elif method == 'df_nonlin':
+        y = (hw[0]/hw)**2 - 1
 
     # define x to fit:
-    x = np.zeros(len(y))
-    i = 0
-    s0 = kidcalc.cinduct(hw0, kidcalc.D(kbT[0], SC), kbT[0])
-    for kbTi in kbT[mask]:
-        D_0 = kidcalc.D(kbTi, SC)
-        s = kidcalc.cinduct(hw[i], D_0, kbTi)
+    x, ak = np.zeros((2, len(y)))
+    D0 = SCth.D(kbT[0], SC)
+    s_0 = SCth.cinduct(hw[0], D0, kbT[0])
+    s0 = SCth.cinduct(hw0, SCth.D(kbT[0], SC), kbT[0])
+    Lk0 = s_0[1]/((s_0[0]**2+s_0[1]**2)*hw[0]) # This is low T, thin film (d << pen.depth) limit
+    for i, kbTi in enumerate(kbT):
+        D_0 = SCth.D(kbTi, SC)
+        s = SCth.cinduct(hw[i], D_0, kbTi)
+        beta = SCth.beta(kbTi, D_0, 
+                         SuperCond.Sheet(
+                             SC, d=S21data[0, 25]))
+        Lk = s[1]/((s[0]**2+s[1]**2)*hw[i])
+        ak[i] = (1-(hw[i]/hw[0])**2)/(1-Lk0/Lk)
         if method == "df":
-            x[i] = (s[1] - s0[1]) / s0[1] * kidcalc.beta(kbTi, D_0,
-                                                         SuperCond.Sheet(
-                                                             SC, d=S21data[0, 25]
-                                                         )) / 4
+            x[i] = (s[1] - s0[1]) / s0[1] * beta / 4
         elif method == "Qi":
-            x[i] = (s[0] - s0[0]) / s0[1] * kidcalc.beta(kbTi, D_0,
-                                                         SuperCond.Sheet(
-                                                             SC, d=S21data[0, 25]
-                                                         )) / 2
-        i += 1
+            x[i] = (s[0] - s0[0]) / s0[1] * beta / 2
+        elif method == 'df_nonlin':
+            x[i] = Lk/Lk0 - 1
+            
+    # Mask the double measured temperatures, and only fit from Tmin
+    mask1 = np.zeros(len(kbT), dtype="bool")
+    mask1[np.unique(np.round(S21data[:, 1], decimals=3), return_index=True)[1]] = True
+    mask = np.logical_and(mask1, (kbT >= Tmin * const.Boltzmann / const.e * 1e6))
 
-    # do the fit:
-    fit = curve_fit(lambda t, ak: ak * t, x, y)
+    if mask.sum() <= 5:
+        warnings.warn("Not enough high temperature S21data, taking the last 5 points")
+        mask = -1*np.linspace(5, 1, 5, dtype=int)
+        
+    # do the fit with mask:
+    fit = curve_fit(lambda t, ak, b: ak * t + b, x[mask], y[mask])
+    
+    # check if result is correct
+    if (fit[0][0] >= 1) or (fit[0][0] < 0):
+        warnings.warn(f'ak is {fit[0][0]}, which is wrong. '+
+                      'Probably the temperature is too low, or ak is too close to 1')
+    
     if plot:
         plt.figure()
-        plt.plot(x, y, "o")
-        plt.plot(x, fit[0] * x)
-        plt.legend(["Data", "Fit"])
+        for xpl, ypl in zip([x, x[mask]], [y, y[mask]]):
+            plt.plot(xpl, ypl, "o")
+            plt.plot(xpl, fit[0][0] * xpl + fit[0][1])
+        plt.legend(["Data", f"Fit, $\\alpha_k={fit[0][0]:.3f}$"])
         if method == "df":
             plt.ylabel(r"$\delta f/f_0$")
             plt.xlabel(r"$\beta \delta \sigma_2/4\sigma_2 $")
         elif method == "Qi":
             plt.ylabel(r"$\delta(1/Q_i)$")
             plt.xlabel(r"$\beta \delta \sigma_1/2\sigma_2 $")
-
+        elif method == 'df_nonlin':
+            plt.ylabel(r'$\left(\frac{\omega_0}{\omega}\right)^2 - 1$')
+            plt.xlabel(r'$\left(\frac{L_k}{L_{k0}}\right) - 1$')
     if reterr:
         return fit[0][0], np.sqrt(fit[1][0])
     else:
         return fit[0][0]
-
-
-def tau(
-    freq, SPR, startf=None, stopf=None, decades=3, minf=1e2, plot=False, retfnl=False
-):
-    """Fits a Lorentzian to a PSD.
-    Arguments:
-    freq -- frequency array (in Hz)
-    SPR -- power spectral denisty values (in dB)
-    startf -- start frequency for the fit, default None: 3 decades lower than stopf
-    stopf -- stop frequency for the fit, default the lowest value in the interval 3e2 to 3e4 Hz
-    decades -- fitrange length in decades, used to determine startf when startf is None.
-    plot -- boolean to show the plot
-    retfnl -- boolean to return the noise level as well.
-    
-    Returns:
-    tau -- lifetime in µs
-    tauerr -- error in tau
-    optionally: noise level (non-dB) and  error in noise level."""
-
-    # Filter nan-values
-    freq = freq[~np.isnan(SPR)]
-    SPR = SPR[~np.isnan(SPR)]
-    freq = freq[SPR != -np.inf]
-    SPR = SPR[SPR != -np.inf]
-    if stopf is None:
-        try:
-            bdwth = np.logical_and(
-                freq > 10 ** (np.log10(minf) + decades), freq < 2 * freq.max() / 10
-            )
-            stopf = freq[bdwth][np.real(SPR[bdwth]).argmin()]
-        except ValueError:
-            stopf = 10 ** (np.log10(minf) + decades)
-    if startf is None:
-        startf = max(10 ** (np.log10(stopf) - decades), minf)
-
-    # fitting a Lorentzian
-    fitmask = np.logical_and(freq >= startf, freq <= stopf)
-    fitfreq = freq[fitmask]
-    if len(fitfreq) < 10:
-        warnings.warn("Too little points in window to do fit.")
-        tau = np.nan
-        tauerr = np.nan
-        N = np.nan
-        Nerr = np.nan
-    else:
-        fitPSD = 10 ** (np.real(SPR[fitmask] - SPR.max()) / 10)
-        # notice the normalization for robust fitting
-
-        def Lorspec(f, t, N):
-            SN = 4 * N * t / (1 + (2 * np.pi * f * t) ** 2)
-            return SN
-
-        try:
-            fit = curve_fit(
-                Lorspec,
-                fitfreq,
-                fitPSD,
-                bounds=([0, 0], [np.inf, np.inf]),
-                p0=(2e-4, 1e4),
-            )
-            tau = fit[0][0] * 1e6
-            tauerr = np.sqrt(np.diag(fit[1]))[0] * 1e6
-            N = fit[0][1] * 10 ** (np.real(SPR.max()) / 10)
-            Nerr = np.sqrt(np.diag(fit[1]))[1] * 10 ** (np.real(SPR.max()) / 10)
-        except RuntimeError:
-            tau, tauerr, N, Nerr = np.ones(4) * np.nan
-
-    if plot:
-        plt.figure()
-        plt.plot(freq[SPR != -140], np.real(SPR), "o")
-        if ~np.isnan(tau):
-            plt.plot(fitfreq, 10 * np.log10(Lorspec(fitfreq, tau * 1e-6, N)), "r")
-            plt.plot(freq, 10 * np.log10(Lorspec(freq, tau * 1e-6, N)), "r--")
-        plt.xscale("log")
-        plt.show()
-        plt.close()
-
-    if retfnl:
-        return (
-            tau,
-            tauerr,
-            4 * N * tau * 1e-6,
-            np.sqrt((4e-6 * N * tauerr) ** 2 + (4e-6 * Nerr * tau) ** 2),
-        )
-    else:
-        return tau, tauerr
 
 
 def Respspl(Chipnum, KIDnum, Pread, phasemethod="f0", ampmethod="Qi", var="cross"):
@@ -249,10 +179,7 @@ def NLcomp(Chipnum, KIDnum, Pread, SCvol=None, method="", var="cross"):
             if \'Reps\' is in the method """
 
     if SCvol is None and method != "":
-        S21data = io.get_S21data(Chipnum, KIDnum, Pread)
-        SCvol = SuperCond.Volume(SuperCond.Al(Tc=S21data[0, 21]),
-                              V=S21data[0, 14],
-                              d=S21data[0, 25])
+        SCvol = SuperCond.init_SCvol(Chipnum, KIDnum, set_tesc=False)
 
     if method != "":
         S21data = io.get_S21data(Chipnum, KIDnum, Pread)
@@ -341,7 +268,7 @@ def NLcomp(Chipnum, KIDnum, Pread, SCvol=None, method="", var="cross"):
                 * SCvol.V
                 * (1 + SCvol.tesc / SCvol.tpb)
                 * (kbTc) ** 3
-                / (kidcalc.D(const.Boltzmann / const.e * 1e6 * S21data[:, 1],
+                / (SCth.D(const.Boltzmann / const.e * 1e6 * S21data[:, 1],
                              SCvol.SC)) ** 2,
                 s=0,
             )
@@ -366,206 +293,9 @@ def NLcomp(Chipnum, KIDnum, Pread, SCvol=None, method="", var="cross"):
             )
         else:
             raise ValueError("{} is an invalid compensation method".format(method))
-        Pint = 10 * np.log10(
-            10 ** (-1 * Pread / 10) * S21data[0, 2] ** 2 / S21data[0, 3] / np.pi
-        )
     else:
         lvlcompspl = interpolate.splrep(np.linspace(0.01, 10, 10), np.ones(10))
     return lvlcompspl
-
-def deconv_ringtime(pulse, chip, kid, temp, pread=None,
-                   numtres=10, fs=1e6, plot=False):
-    S21data = io.get_S21data(chip, kid, pread)
-    Tind = (S21data[:, 1] - temp).argmin()
-    Q = S21data[Tind, 2]
-    fres = S21data[Tind, 5]
-    tres = Q / (fres * np.pi) * fs
-    t = np.arange(numtres*tres)
-    impulseresp = np.exp(-t/tres) 
-    impulseresp /= impulseresp.sum()
-    
-    deconv, remain = deconvolve(pulse, impulseresp)
-    if plot:
-        fig, axs = plt.subplots(2, 1, sharex=True)
-        for ax in axs:
-            ax.plot(pulse, label='data')
-            ax.plot(deconv, label=f'deconv., $\\tau_{{res}}$={tres:.0e} µs')
-            ax.plot(remain, label='remain')
-        axs[0].legend()
-        axs[0].set_yscale('log')
-    return deconv
-    
-def tau_pulse(
-    pulse,
-    pulsestart=500,
-    sfreq=1e6,
-    tfit=(10, 1e3),
-    tauguess=500,
-    reterr=False,
-    plot=False,
-):
-    """Calculates lifetime from a exponential fit to a pulse.
-    Arguments:
-    pulse -- pulse data at 1 MHz, with begin of the pulse at 500 (µs)
-    pulsestart -- index where the rise time of the pulse is halfway
-    sfreq -- sample frequency of the pulse data
-    tfit -- tuple to specify the fitting window, default is (10,1e3)
-    reterr -- boolean to return error
-    plot -- boolean to plot the fit
-
-    Returns:
-    tau -- in µs
-    optionally the fitting error"""
-
-    t = np.arange(len(pulse)) - pulsestart
-    fitmask = np.logical_and(t > tfit[0], t < tfit[1])
-    t2 = t[fitmask]
-    peak2 = pulse[fitmask]
-    try:
-        fit = curve_fit(
-            lambda x, a, b: b * np.exp(-x / a), t2, peak2,
-            p0=(tauguess*1e6/sfreq, peak2[0])
-        )
-    except RuntimeError:
-        fit = [[np.nan, np.nan], np.array([[np.nan, np.nan], [np.nan, np.nan]])]
-
-    if plot:
-        plt.figure()
-        plt.plot(t, pulse)
-        plt.plot(t2, fit[0][1] * np.exp(-t2 / fit[0][0]))
-        plt.yscale("log")
-        plt.show()
-        plt.close()
-    if reterr:
-        return fit[0][0] * 1e6 / sfreq, np.sqrt(fit[1][0, 0]) * 1e6 / sfreq
-    else:
-        return fit[0][0] * 1e6 / sfreq
-
-
-def fit_nonexppulse(
-    pulse,
-    pulsestart=500,
-    sfreq=1e6,
-    tsstfit=(200, 1e3),
-    tssguess=500,
-    tfit=(0, 3e3),
-    reterr=False,
-    plot=False,
-):
-    """Fits an equation of the form: 
-        x(t) = xi*(1-r)/(exp(t/tss)-r). 
-    This is a solution to 
-        dx/dt = -R x^2  -x/tss, 
-    with r/(1-r)=R*xi*tss (Wang2014). 
-    First, tss is estimated from the second part of the pulse decay (tsstfit), 
-    after which r is extracted with the full fit window (tfit). Otherwise the fit does not converge.
-    Both tfit and tsstfit are with respect to the pulsestart.
-    
-
-    Returns:
-    tss -- in µs
-    R -- in µs^-1
-    xi -- in the same units as pulse
-    optionally with error"""
-
-    # first extract the steady state (tail) decay time
-    tss, tsserr = (
-        np.array(tau_pulse(pulse, pulsestart, sfreq, tsstfit, tssguess, reterr=True))
-        * 1e-6
-        * sfreq
-    )
-
-    # set-up for the fit:
-    t = np.arange(len(pulse)) - pulsestart
-    fitmask = np.logical_and(t > tfit[0], t < tfit[1])
-    t2 = t[fitmask]
-    peak2 = pulse[fitmask]
-
-    # now do the fit:
-    def fitfun(t, r, xi):
-        return xi * (1 - r) / (np.exp(t / tss) - r) 
-
-    fit = curve_fit(fitfun, t2, peak2, p0=(0.5, peak2[0]),
-                    bounds=([0, 0] , [1, pulse.max()]))
-    R = fit[0][0] / (1 - fit[0][0]) / (fit[0][1] * tss)
-
-    if plot:
-        fig, axs = plt.subplots(2, 1, figsize=(5, 7), sharex=True)
-        for ax in axs:
-            ax.plot(t, pulse, label='data')
-            ax.plot(t2, fitfun(t2, *fit[0]), 'r', label='1/t + exp. fit')
-            ax.plot(t[pulsestart:], fitfun(t[pulsestart:], *fit[0]),
-                 'r--')
-            tssmask = (t > tsstfit[0]) & (t < tsstfit[1])
-            ax.plot(t[tssmask], fitfun(t[tssmask], *fit[0]), 'r',
-                    linewidth=4., label=f'$\\tau_{{ss}}$ fit-range\n $\\tau_{{ss}}$={tss:.0f} µs')
-        axs[0].set_yscale("log")
-        axs[0].legend()
-
-    if reterr:
-        return (
-            tss * 1e6 / sfreq,
-            tsserr * 1e6 / sfreq,
-            R * 1e6 / sfreq,
-            np.sqrt(
-                (
-                    np.array(
-                        [
-                            1
-                            / (1 - fit[0][0])
-                            / tss
-                            / fit[0][1]
-                            * (1 + fit[0][0] / (1 - fit[0][0])),
-                            fit[0][0] / (1 - fit[0][0]) / tss ** 2 / fit[0][1],
-                            fit[0][0] / (1 - fit[0][0]) / tss / fit[0][1] ** 2,
-                        ]
-                    )
-                    ** 2
-                )
-                .dot([fit[1][0, 0], tsserr ** 2, fit[1][1, 1]])
-                .sum()
-            ),
-            fit[1][1, 1]
-        )
-    else:
-        return tss * 1e6 / sfreq, R * 1e6 / sfreq, fit[0][1]
-
-
-def double_exp(pulse, pulsestart=500, sfreq=1e6,
-               tfit=None, t1fit=(1, 10), t2fit=(50, 150),
-               reterr=False, tauguess=(10, 100), plot=False):
-    '''Returns first and second decay times, based on a 4 parameter
-    double exponential fit of the form: A1 exp(-t/t1) + A2 exp(-t/t2)'''
-    if tfit is None:
-        tfit = (0, len(pulse) - pulsestart)
-
-    t1, t1err = tau_pulse(pulse, pulsestart, sfreq, t1fit,
-                          tauguess[0]*1e6/sfreq, reterr=True)
-    t2, t2err = tau_pulse(pulse, pulsestart, sfreq, t2fit,
-                          tauguess[1]*1e6/sfreq, reterr=True)
-
-    def fitfun(t, A1, A2):
-        return A1 * np.exp(-t / t1) + A2 * np.exp(-t / t2)
-
-    t = np.arange(len(pulse)) - pulsestart
-    fitmask = np.logical_and(t > tfit[0], t < tfit[1])
-
-    fit = curve_fit(
-        fitfun, t[fitmask], pulse[fitmask],
-        p0=(pulse.max(), pulse.max()*1e-2)
-    )
-    if plot:
-        plt.plot(t, pulse, label='data')
-        plt.plot(t[fitmask], fitfun(t[fitmask], *fit[0]), 'r', label='double exp. fit')
-        plt.plot(t[pulsestart:], fitfun(t[pulsestart:], *fit[0]),
-                 'r--')
-        plt.yscale("log")
-        plt.legend()
-
-    if reterr:
-        pass
-    else:
-        return t1*1e6/sfreq, t2*1e6/sfreq, fit[0][0], fit[0][1]
 
 
 def tesc(
@@ -613,12 +343,12 @@ def tesc(
         ):
             tescar[i] = np.nan
         else:
-            tescar[i] = kidcalc.tesc(
+            tescar[i] = SCth.tau.esc(
                 const.Boltzmann / const.e * 1e6 * Temp[i] * 1e-3, tqpstar[i],
                 SCvol.SC
             )
             tescarerr[i] = np.abs(
-                kidcalc.tesc(
+                SCth.tau.esc(
                     const.Boltzmann / const.e * 1e6 * Temp[i] * 1e-3,
                     tqpstarerr[i], SCvol.SC
                 )
@@ -655,7 +385,7 @@ def tesc(
             )
         except ValueError:
             T = np.linspace(minTemp, maxTemp, 100)
-        taukaplan = kidcalc.tau_kaplan(T * 1e-3, SCvol)
+        taukaplan = SCth.tau_kaplan(T * 1e-3, SCvol)
         plt.plot(T, taukaplan)
         plt.yscale("log")
         plt.ylim(None, 1e4)
@@ -680,18 +410,18 @@ def get_tescdict(Chipnum, Pread="max"):
     return tescdict
 
 
-def NqpfromQi(S21data, uselowtempapprox=True, SC=SuperCond.Al()):
+def NqpfromQi(S21data, uselowtempapprox=True, SC=SuperCond.Al):
     """Calculates the number of quasiparticles from the measured temperature dependence of Qi.
     Returns temperatures in K, along with the calculated quasiparticle numbers. 
     If uselowtempapprox, the complex impedence is calculated directly with a low 
-    temperature approximation, else it\'s calculated with the cinduct function in kidcalc 
+    temperature approximation, else it\'s calculated with the cinduct function in SCth 
     (slow)."""
     ak_ = ak(S21data)
     hw = S21data[:, 5] * const.Plack / const.e * 1e6
     kbT = S21data[:, 1] * const.Boltzmann / const.e * 1e6
 
     if uselowtempapprox:
-        beta_ = kidcalc.beta(kbT[0], SC.D0, SuperCond.Sheet(
+        beta_ = SCth.beta(kbT[0], SC.D0, SuperCond.Sheet(
             SC,
             d=S21data[0, 25]
         ))
@@ -718,19 +448,19 @@ def NqpfromQi(S21data, uselowtempapprox=True, SC=SuperCond.Al()):
                 method="bounded",
             )
             kbTeff = res.x
-            Nqp[i] = S21data[0, 14] * kidcalc.nqp(kbTeff, SC.D0, SC)
+            Nqp[i] = S21data[0, 14] * SCth.nqp(kbTeff, SC.D0, SC)
         return kbT / (const.Boltzmann / const.e * 1e6), Nqp
     else:
 
         def minfunc(kbT, s2s1, hw, SC):
-            D_ = kidcalc.D(kbT, SC)
-            s1, s2 = kidcalc.cinduct(hw, D_, kbT)
+            D_ = SCth.D(kbT, SC)
+            s1, s2 = SCth.cinduct(hw, D_, kbT)
             return np.abs(s2s1 - s2 / s1)
 
         Nqp = np.zeros(len(kbT))
         for i in range(len(kbT)):
-            D_0 = kidcalc.D(kbT[i], SC)
-            beta_ = kidcalc.beta(kbT[i], D_0, SuperCond.Sheet(
+            D_0 = SCth.D(kbT[i], SC)
+            beta_ = SCth.beta(kbT[i], D_0, SuperCond.Sheet(
                 SC,
                 d=S21data[0, 25]
             ))
@@ -739,6 +469,6 @@ def NqpfromQi(S21data, uselowtempapprox=True, SC=SuperCond.Al()):
                 minfunc, args=(s2s1, hw[i], SC), bounds=(0, SC.kbTc), method="bounded"
             )
             kbTeff = res.x
-            D_ = kidcalc.D(kbTeff, SC)
-            Nqp[i] = S21data[0, 14] * kidcalc.nqp(kbTeff, D_, SC)
+            D_ = SCth.D(kbTeff, SC)
+            Nqp[i] = S21data[0, 14] * SCth.nqp(kbTeff, D_, SC)
         return kbT / (const.Boltzmann / const.e * 1e6), Nqp

@@ -9,9 +9,9 @@ import scipy.constants as const
 import SC as SuperCond
 from kidata import io
 from kidata import calc
-from kidata import filters
+from kidata import noise
 
-import kidcalc
+import SCtheory as SCth
 
 
 def _selectPread(pltPread, Preadar):
@@ -54,6 +54,7 @@ def spec(
     pltPread="all",
     spec="all",
     lvlcomp="",
+    version=None,
     SCvol=None,
     SCkwargs={},
     clbar=True,
@@ -75,9 +76,9 @@ def spec(
         Use Resp to divide by responsivity and obtain quasiparticle fluctuations.
         Use Resptres to compensate for the factor (1+(omega*taures)^2) and get the quasiparticle fluctuations.
     plttres will plot an arrow at the frequencies corresponding to the resonator ring time."""
-    TDparam = io.get_grTDparam(Chipnum)
+    TDparam = io.get_grTDparam(Chipnum, version)
     if suboffres:
-        TDparamoffres = io.get_grTDparam(Chipnum, offres=True)
+        TDparamoffres = io.get_grTDparam(Chipnum, version='offres')
 
     if KIDlist is None:
         KIDlist = io.get_grKIDs(TDparam)
@@ -88,6 +89,8 @@ def spec(
         specs = ["cross", "amp", "phase"]
     elif type(spec) == list:
         specs = spec
+    elif spec == 'allcross':
+        specs = ['cross', 'crosspos', 'crossimagneg', 'crossimagpos']
     else:
         raise ValueError("Invalid Spectrum Selection")
 
@@ -96,7 +99,7 @@ def spec(
             if SCvol is None:
                 SCvol = SuperCond.init_SCvol(Chipnum, KIDnum, **SCkwargs)
         else:
-            SCvol = SuperCond.Vol(SuperCond.Al(), np.nan, np.nan)
+            SCvol = SuperCond.Vol(SuperCond.Al, np.nan, np.nan)
             
         Preadar = _selectPread(pltPread, io.get_grPread(TDparam, KIDnum))
         if ax12 is None:
@@ -111,6 +114,18 @@ def spec(
             fig.suptitle(f"{Chipnum}, KID{KIDnum}")
         else:
             axs = ax12
+            
+        if cmap is None or norm is None:
+            # get max and min of all Temps
+            minTemps, maxTemps = np.zeros((2,len(Preadar)))
+            for i, Pread in enumerate(Preadar):
+                Temp = io.get_grTemp(TDparam, KIDnum, Pread)
+                minTemps[i], maxTemps[i] = (Temp.min(), Temp.max())
+            
+            cmap = matplotlib.cm.get_cmap("viridis")
+            norm = matplotlib.colors.Normalize(
+                np.max([minTemps.min(), Tminmax[0]]),
+                np.min([maxTemps.max(), Tminmax[1]]))
 
         for ax1, Pread in zip(range(len(Preadar)), Preadar):
 
@@ -120,9 +135,6 @@ def spec(
                 Temp = np.intersect1d(Temp, io.get_grTemp(TDparamoffres, KIDnum, Pread))
 
             Temp = Temp[np.logical_and(Temp < Tminmax[1], Temp > Tminmax[0])]
-            if cmap is None or norm is None:
-                cmap = matplotlib.cm.get_cmap("viridis")
-                norm = matplotlib.colors.Normalize(Temp.min(), Temp.max())
             if clbar:
                 clb = plt.colorbar(
                     matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axs[ax1, -1]
@@ -143,14 +155,14 @@ def spec(
                         orfreq, orSPR = io.get_grdata(
                             TDparamoffres, KIDnum, Pread, Temp[i], spec=spec
                         )
-                        freq, SPR = filters.subtr_spec(freq, SPR, orfreq, orSPR)
+                        freq, SPR = noise.filters.subtr_spec(freq, SPR, orfreq, orSPR)
 
                     if delampNoise:
-                        freq, SPR = filters.del_ampNoise(freq, SPR)
+                        freq, SPR = noise.filters.del_ampNoise(freq, SPR)
                     if del1fNoise:
-                        freq, SPR = filters.del_1fNoise(freq, SPR)
+                        freq, SPR = noise.filters.del_1fNoise(freq, SPR)
                     if del1fnNoise:
-                        freq, SPR = filters.del_1fnNoise(freq, SPR)
+                        freq, SPR = noise.filters.del_1fnNoise(freq, SPR)
 
                     SPR[SPR == -140] = np.nan
                     SPR[SPR == -np.inf] = np.nan
@@ -166,17 +178,9 @@ def spec(
 
                     if plttres:
                         Tind = np.abs(S21data[:, 1] - Temp[i] * 1e-3).argmin()
-                        fres = S21data[Tind, 5] / (2 * S21data[Tind, 2])
-                        axs[ax1, ax2].annotate(
-                            "",
-                            (fres, 1),
-                            (fres, 1.25),
-                            arrowprops=dict(
-                                arrowstyle="simple", color=cmap(norm(Temp[i])), ec="k"
-                            ),
-                            annotation_clip=False,
-                            xycoords=('data', 'axes fraction')
-                        )
+                        fring = S21data[Tind, 5] / (2 * S21data[Tind, 2])
+                        axs[ax1, ax2].axvline(fring, linestyle='--',
+                                              color=cmap(norm(Temp[i])))
         axs[0, 0].set_xlim(*xlim)
         axs[0, 0].set_ylim(*ylim)
     #         plt.tight_layout()
@@ -249,7 +253,7 @@ def ltnlvl(
         elif color == "Pint":
             cmap = matplotlib.cm.get_cmap("plasma")
             norm = matplotlib.colors.Normalize(
-                kwargs["Pintar"].min() * 1.05, kwargs["Pintar"].max() * 0.95
+                kwargs["Pintar"].min(), kwargs["Pintar"].max()
             )
             if pltclrbar:
                 clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap))
@@ -325,7 +329,7 @@ def ltnlvl(
             if SCvol is None:
                 SCvol = SuperCond.init_SCvol(Chipnum, KIDnum, **SCkwargs)
         else:
-            SCvol = SuperCond.Vol(SuperCond.Al(), np.nan, np.nan)
+            SCvol = SuperCond.Vol(SuperCond.Al, np.nan, np.nan)
 
         for Pread in Preadar:
             Temp = np.trim_zeros(io.get_grTemp(TDparam, KIDnum, Pread))
@@ -351,13 +355,13 @@ def ltnlvl(
                     orfreq, orSPR = io.get_grdata(
                         TDparamoffres, KIDnum, Pread, Temp[i], spec
                     )
-                    freq, SPR = filters.subtr_spec(freq, SPR, orfreq, orSPR)
+                    freq, SPR = noise.filters.subtr_spec(freq, SPR, orfreq, orSPR)
                 if delampNoise:
-                    freq, SPR = filters.del_ampNoise(freq, SPR)
+                    freq, SPR = noise.filters.del_ampNoise(freq, SPR)
                 if del1fNoise:
-                    freq, SPR = filters.del_1fNoise(freq, SPR)
+                    freq, SPR = noise.filters.del_1fNoise(freq, SPR)
                 if del1fnNoise:
-                    freq, SPR = filters.del_1fnNoise(freq, SPR)
+                    freq, SPR = noise.filters.del_1fnNoise(freq, SPR)
 
                 if showfit:
                     print(
@@ -365,11 +369,10 @@ def ltnlvl(
                             Chipnum, KIDnum, Pread, Temp[i], spec
                         )
                     )
-                taut[i], tauterr[i], lvl[i], lvlerr[i] = calc.tau(
+                taut[i], tauterr[i], lvl[i], lvlerr[i] = noise.fit.Lorentzian(
                     freq,
                     SPR,
                     plot=showfit,
-                    retfnl=True,
                     startf=startstopf[0],
                     stopf=startstopf[1],
                 )
@@ -388,7 +391,7 @@ def ltnlvl(
             if color == "Pread":
                 clr = cmap(norm(-1 * Pread))
             elif color == "Pint":
-                clr = cmap(norm(Pint))
+                clr = cmap(norm(np.array(Pintdict[KIDnum])[Preadar==Pread]))
             elif color == "V":
                 clr = cmap(norm(Vdict[KIDnum]))
             elif color == "KIDnum":
@@ -471,7 +474,7 @@ def ltnlvl(
                     T = T * (SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6))
                 else:
                     T = T * 1e-3
-                taukaplan = kidcalc.tau_kaplan(T, SCvol)
+                taukaplan = SCth.tau.qpstar(T, SCvol)
                 if pltTTc:
                     T = T / (SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6))
                 else:
@@ -483,7 +486,7 @@ def ltnlvl(
                     color=clr,
                     linestyle="--",
                     linewidth=2.0,
-                    label="Kaplan, $\\tau_{qp}$",
+                    label="Kaplan, $\\tau_{qp}^*$",
                 )
 
             if plttscat:
@@ -526,7 +529,7 @@ def ltnlvl(
                     T = np.linspace(Temp[mask].min(), Temp[mask].max(), 100)
                     Nqp = np.zeros(len(T))
                     for i in range(len(T)):
-                        Nqp[i] = SCvol.V * kidcalc.nqp(
+                        Nqp[i] = SCvol.V * SCth.nqp(
                             T[i] * 1e-3 * const.Boltzmann / const.e * 1e6,
                             SCvol.D0,
                             SCvol.SC,
@@ -619,7 +622,7 @@ def Nqp(
     fig=None,
     ax=None,
     label=None,
-    color=None,
+    pltcolor=None,
     fmt="-o",
 ):
     """Plots the number of quasiparticle calculated from the noise levels and lifetimes from PSDs.
@@ -639,7 +642,7 @@ def Nqp(
 
     if Preadar.size > 1:
         cmap = matplotlib.cm.get_cmap("plasma")
-        norm = matplotlib.colors.Normalize(-1.05 * Preadar.max(), -0.95 * Preadar.min())
+        norm = matplotlib.colors.Normalize(-1.05 * Preadar.max(), -.95*Preadar.min())
         clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax)
         clb.ax.set_title(r"$P_{read}$ (dBm)")
     if SCvol is None:
@@ -660,13 +663,13 @@ def Nqp(
         for i in range(len(Temp)):
             freq, SPR = io.get_grdata(TDparam, KIDnum, Pread, Temp[i], spec=spec)
             if delampNoise:
-                freq, SPR = filters.del_ampNoise(freq, SPR)
+                freq, SPR = noise.filters.del_ampNoise(freq, SPR)
             if del1fNoise:
-                freq, SPR = filters.del_1fNoise(freq, SPR)
+                freq, SPR = noise.filters.del_1fNoise(freq, SPR)
             if del1fnNoise:
-                freq, SPR = filters.del_1fnNoise(freq, SPR)
-            taut[i], tauterr, lvl, lvlerr = calc.tau(
-                freq, SPR, retfnl=True, startf=startstopf[0], stopf=startstopf[1]
+                freq, SPR = noise.filters.del_1fnNoise(freq, SPR)
+            taut[i], tauterr, lvl, lvlerr = noise.fit.Lorentzian(
+                freq, SPR, startf=startstopf[0], stopf=startstopf[1]
             )
             lvl = lvl / interpolate.splev(Temp[i] * 1e-3, Respspl) ** 2
             lvlerr = lvlerr / interpolate.splev(Temp[i] * 1e-3, Respspl) ** 2
@@ -677,13 +680,15 @@ def Nqp(
             )
         mask = ~np.isnan(Nqp)
         mask[mask] = Nqperr[mask] / Nqp[mask] <= relerrthrs
-        if color is None:
+        if pltcolor is None:
             if Preadar.size > 1:
                 color = cmap(norm(-1 * Pread))
             elif pltPread == "min":
                 color = "purple"
             elif pltPread == "max":
                 color = "gold"
+        else:
+            color=pltcolor
 
         dataline = ax.errorbar(
             Temp[mask],
@@ -696,7 +701,7 @@ def Nqp(
             label=label,
         )
         if pltNqptau:
-            Nqp_ = SCvol.V * kidcalc.nqpfromtau(taut, SCvol)
+            Nqp_ = SCvol.V * SCth.nqpfromtau(taut, SCvol)
             (tauline,) = ax.plot(
                 Temp[mask],
                 Nqp_[mask],
@@ -737,12 +742,13 @@ def Nqp(
         T = np.linspace(*ax.get_xlim(), 100)
         NqpT = np.zeros(100)
         for i in range(len(T)):
-            D_ = kidcalc.D(const.Boltzmann / const.e * 1e6 * T[i] * 1e-3, SCvol.SC)
-            NqpT[i] = SCvol.V * kidcalc.nqp(
+            D_ = SCth.D(const.Boltzmann / const.e * 1e6 * T[i] * 1e-3, SCvol.SC)
+            NqpT[i] = SCvol.V * SCth.nqp(
                 const.Boltzmann / const.e * 1e6 * T[i] * 1e-3, D_, SCvol.SC
             )
         (Thline,) = ax.plot(
-            T, NqpT, color="k", zorder=len(ax.lines) + 1, label="Thermal $N_{qp}$"
+            T, NqpT, color='k' if color is None else color, 
+            zorder=len(ax.lines) + 1, label="Thermal $N_{qp}$"
         )
 
     handles, labels = ax.get_legend_handles_labels()

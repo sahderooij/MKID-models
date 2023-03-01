@@ -10,9 +10,8 @@ import scipy.constants as const
 from scipy.optimize import minimize_scalar
 
 '''TODO:
-- Find and implement Coupler analytic formula
-- Refactor KID object with child hyKID and open/shorted
-    and quarter/half wave options
+- Find and implement Coupler analytic formula (see Besedin2018, but quite hard)
+- open/shorted and quarter/half wave options
 - Implement important design characteristics:
     - P_0 (power handling) (bifurcation point)
     - Expected phase noise

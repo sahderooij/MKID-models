@@ -138,10 +138,10 @@ def get_S21data(Chipnum, KIDnum, Pread=None):
 
 
 def get_avlbins(folder):
-    bins = np.array([[int(i.split('\\')[-1].split('_')[0][3:]),
+    bins = np.unique(np.array([[int(i.split('\\')[-1].split('_')[0][3:]),
                       int(i.split('\\')[-1].split('_')[1][:-3]),
                       int(i.split('\\')[-1].split('_')[4][3:-4])]
-                     for i in glob.iglob(folder + '/*TDmed*.bin')])
+                     for i in glob.iglob(folder + '/*.bin')]), axis=0)
     bindf = pd.DataFrame(bins, columns=['KID', 'Pread', 'T']).sort_values(
         by=['KID', 'Pread', 'T'])
     return bindf.values
@@ -159,7 +159,7 @@ def get_bin(folder, KID, Pread, T, strm):
 
 
 def get_avgpulse(Chipnum, KID, Pread, T, wvl, subfolder='', std=False, coord='ampphase'):
-    '''Returns the phase and amplitude data (in that order)
+    '''Returns the amplitude and phase data (in that order)
     of the average pulse, calculated from kidata.pulse.calc_avgpulse.
     Note: the baseline is subtracted from amplitude.
     If std is True, the standard deviation is returned, instead of
@@ -223,32 +223,6 @@ def get_pulseTemp(Chipnum, KIDnum, Pread, wvl, subfolder=''):
                       for i in glob.iglob(
                           get_datafld() +
                           f'{Chipnum}\\Pulse\\{wvl}nm\\{subfolder}KID{KIDnum}_{Pread}dBm*.csv')])
-
-
-
-
-
-# OLD PULSE ANALYSIS DATA:
-
-
-def get_pulsedata(Chipnum, KIDnum, Pread, Tbath, wvlngth, points=3000):
-    '''Returns the phase and amplitude average pulse from the .mat-file. 
-    Default is 3000 points in time, but can also be set to 7000 if this file exsists.'''
-    datafld = get_datafld()
-    peakfile = datafld + "\\".join(
-        [
-            Chipnum,
-            str(Tbath) + "mK",
-            "_".join(
-                ["KID" + str(KIDnum), str(Pread) + "dBm",
-                 str(wvlngth), str(points) + "points"]
-            ),
-        ]
-    )
-    peakdata = scipy.io.loadmat(peakfile)
-    peakdata_ph = peakdata["pulsemodelfo"][0]
-    peakdata_amp = peakdata["pulsemodelfo_amp"][0]
-    return peakdata_ph, peakdata_amp
 
 
 # GR Noise

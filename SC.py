@@ -4,25 +4,52 @@ import scipy.integrate as integrate
 import scipy.constants as const
 import os
 import numpy as np
+import warnings
 
 
 class Superconductor(object):
-    '''General class for superconductor material properties. '''
+    '''General class for superconductor material properties.
+    Free electron model is assumed.'''
 
-    def __init__(self, name, Tc, TD, N0, rhon, EF, vF, t0, tpb):
+    def __init__(self, name, Tc, TD, N0, rhon, kF,  t0, tpb, cT, cL, rho):
         self.name = name
         self.kbTc = Tc * const.Boltzmann / const.e * 1e6  # critical Temperature in µeV
         self.kbTD = TD * const.Boltzmann / const.e * 1e6  # Debye Energy in µeV
         self.N0 = N0  # Electronic DoS at Fermi Surface [µeV^-1 µm^-3]
-        self.rhon = rhon  # normal state resistivity [µOhmcm]
-        self.EF = EF  # Fermi Energy [µeV]
-        self.vF = vF  # Fermi velocity [µm/µs]
+        self.rhon = rhon  # normal state resistivity [µOhmcm] (!)
+        self.kF = kF  # Fermi wave number [µm^-1]
         self.t0 = t0  # electron-phonon interaction time [µs]
         self.tpb = tpb  # phonon pair-breaking time [µs]
+        self.cT = cT # transverse speed of sound
+        self.cL = cL # longitudinal speed of sound
+        self.rho = rho/const.e*1e-12 # mass density give in kg/m^3, returns in µeV/(µm/µs)**2 µm^-3
+        
+    @property
+    def mstar(self):
+        '''effective electron mass in µeV/(µm/µs)^2'''
+        return 2 * (const.hbar*1e12/const.e)**2 * self.N0 * np.pi**2/self.kF
+        
+    @property
+    def vF(self):
+        '''Fermi velocity in µm/µs'''
+        return const.hbar*1e12/const.e * self.kF / self.mstar
+    
+    @property
+    def EF(self):
+        '''Fermi energy in µeV'''
+        return (const.hbar*1e12/const.e)**2 * self.kF**2 / (2*self.mstar)
+    
+    @property
+    def l_e(self):
+        '''electron mean free path in µm'''
+        return (3*np.pi**2 * (const.hbar *1e12 / const.e) /
+                (self.kF**2 * (self.rhon * 1e10 / const.e) * const.e**2))
 
     @property
     def lbd0(self):
-        """Calculates the London penetration depth (i.e. at T = 0 K)"""
+        """London penetration depth (i.e. at T = 0 K) in µm. 
+        This only holds when Mattis-Bardeen can be used 
+        (i.e. dirty limit or extreme anomalous limit)"""
         return np.sqrt(
             const.hbar * 1e12 / const.e
             * self.rhon * 1e4
@@ -70,9 +97,17 @@ class Superconductor(object):
         return 1.76 * self.kbTc
 
     @property
-    def xi0BSC(self):
+    def xi0(self):
         """BSC Coherence length at T = 0 K (in [µm])"""
         return const.hbar * 1e12 / const.e * self.vF / (np.pi * self.D0)
+    
+    @property
+    def xi_DL(self):
+        '''Dirty limit coherence length'''
+        if self.xi0/self.l_e > 10:  
+            return np.sqrt(self.xi0 * self.l_e)
+        else:
+            warnings.warn(f'Not in dirty limit xi0={self.xi0}, l={self.l}')
 
     @property
     def jc(self):
@@ -81,64 +116,119 @@ class Superconductor(object):
             self.N0 * self.D0**3 /
             (self.rhon * 1e-2 / const.e * const.hbar * 1e12 / const.e)
                            )
+    
+    @property
+    def D(self):
+        '''Diffusion constant in µm^2/µs'''
+        return 1/(2 * (self.rhon * 1e10 / const.e) * const.e**2 * self.N0)
+    
+    @property
+    def lbd_eph(self):
+        '''Electron-phonon coupling constant, (with BSC relation 2D=3.52kbTc)'''
+        return (self.N0 * self.Vsc)
+        
+    @property
+    def rhoM(self):
+        '''The Mott resisitivty in µOhm cm'''
+        return 3 * np.pi**2 * const.hbar / (const.e**2 * self.kF * 1e6) * 1e8
+    
+    @property
+    def cs(self):
+        '''effective 3D speed of sound'''
+        return (3/(2/self.cT**3 + 1/self.cL**3))**(1/3)
 
 
-# Sub-classes, which are the actual superconductors
-class PEC(Superconductor):
-    def __init__(self, Tc=300, rhon=0):
-        super().__init__(
-            'PEC', Tc, np.nan, np.nan, rhon, np.nan, np.nan, np.nan, np.nan)
+###################### The superconductor objects ##########################
+############################################################################
 
 
-class Al(Superconductor):
-    def __init__(self, Tc=1.2, rhon=0.9):
-        """The hardcoded arguments for the
-        __init__() method, are standard constants for Al"""
-        super().__init__(
-            "Al", Tc, 433, 1.72e4, rhon, 11.6e6, 2.03e6, 0.44, 0.28e-3)
+PEC = Superconductor('PEC', 
+                     Tc=300,
+                     rhon=0,
+                     TD=np.nan,
+                     N0=np.nan,
+                     kF=np.nan,
+                     t0=np.nan, 
+                     tpb=np.nan,
+                     cL=np.nan,
+                     cT=np.nan,
+                     rho=np.nan)
+
+# Constants from Kaplan1976, Kaplan1976
+Al = Superconductor('Al', 
+                     Tc=1.2,
+                     rhon=0.9,
+                     TD=433,
+                     N0=1.72e4,
+                     kF=1.75e4,
+                     t0=.44, 
+                     tpb=.28e-3,
+                     cL=6.65e3,
+                     cT=3.26e3,
+                     rho=2.5e3)
 
 
-class bTa(Superconductor):
-    def __init__(self, Tc=1.0, rhon=239.0):
-        """The default escape time is calculated with Kaplan1979 for (a)Ta on 
-        Sapphire.
-        tpb is calculated with Kaplan formula for tph0, with N and N(0) from 
-        Abadias2019.
-        tau0 is calculated from the power law GR noise lifetimes in LT192,
-            CPWs with tau0 = 4.2 tau_GR(Tc) (see Kaplan1979)
-        The hardcoded arguments for the __init__() method, are standard 
-        constants for Ta from Abadias2019 
-        and Magnuson2019"""
-        super().__init__(
-            "bTa", Tc, 266, 3.07e4, rhon, np.nan, np.nan, 81e-3, 0.015e-3
-        )
+# tpb is calculated with Kaplan formula for tph0, with N and N(0) from 
+# Abadias2019.
+# tau0 is calculated from the power law GR noise lifetimes in LT192,
+#     CPWs with tau0 = 4.2 tau_GR(Tc) (see Kaplan1979)
+# EF, N0 and vF are calculated with the free electron model, 
+#     with the results from the magnetoresistance experiments.
+# The res are constants for Ta from Abadias2019 and Magnuson2019
+bTa = Superconductor('bTa', 
+                     Tc=1.,
+                     rhon=206.,
+                     TD=266,
+                     N0=2.6e4,
+                     kF=2.3e4,
+                     t0=81e-3, 
+                     tpb=.015e-3, 
+                     cL=4.34e3,
+                     cT=1.73e3,
+                     rho=16.6e3)
 
 
-class aTa(Superconductor):
-    def __init__(self, Tc=4.4, rhon=8.8):
-        """ The hardcoded arguments for the
-        __init__() method, are standard constants for Ta from Abadia2019 
-        and Magnuson2019 """
-        super().__init__(
-            "aTa", Tc, 258, 5.70e4, rhon, 9.5e6, 0.24e6, 1.78e-3, 0.0227e-3,
-        )
+# Data from Abadia2019 and Magnuson2019
+aTa = Superconductor('aTa',
+                     Tc=4.4,
+                     rhon=8.8,
+                     TD=258, 
+                     N0=5.7e4,
+                     kF=1.6e4,
+                     t0=1.78e-3,
+                     tpb=.015e-3,
+                     cL=3.9e3,
+                     cT=2.01e3,
+                     rho=17.1e3)
 
+# Film C of Coumou2013 and Kardakova2015
+#  The Debye temperature is for T = 300 K,
+#        https://doi.org/10.1016/S1006-7191(08)60082-4
+# density from Hansen2020
+TiN = Superconductor('TiN',
+                     Tc=2.7,
+                     rhon=253.,
+                     TD=579.2,
+                     N0=6.17e4,
+                     kF=np.nan,
+                     t0=4.2*23e-3,
+                     tpb=np.nan,
+                     cL=np.nan,
+                     cT=np.nan,
+                     rho=5e3)
 
-class TiN(Superconductor):
-    def __init__(self, Tc=2.7, rhon=253.):
-        """The default values are set to the film C of
-        in Coumou2013 and Kardakova2015.
-        The Debye temperature is for T = 300 K,
-        https://doi.org/10.1016/S1006-7191(08)60082-4"""
-        super().__init__(
-            "TiN", Tc, 579.2, 6.17e4, rhon, np.nan, np.nan, 23e-3 * 4.2, np.nan)
-
-
-class NbTiN(Superconductor):
-    def __init__(self, Tc=15.1, rhon=115.):
-        super().__init__(
-            'NbTiN', Tc, np.nan, 3.7e4, rhon, np.nan, np.nan, np.nan, np.nan)
-
+# Sidorova
+NbTiN = Superconductor('NbTiN',
+                       Tc=15.1,
+                       rhon=115.,
+                       TD=np.nan,
+                       N0=3.7e4,
+                       kF=np.nan,
+                       t0=np.nan,
+                       tpb=np.nan,
+                       cL=np.nan,
+                       cT=np.nan,
+                       rho=3e3)
 
 class Sheet(object):
     '''A superconducting sheet with a certain thickness d and phonon escape
@@ -199,8 +289,11 @@ def init_SCvol(Chipnum, KIDnum, SC_class=Al, rhon=np.nan, set_tesc=True, **tesck
     import kidata
 
     S21data = kidata.io.get_S21data(Chipnum, KIDnum)
-    SCvol = Vol(SC_class(Tc=S21data[0, 21], rhon=rhon), V=S21data[0, 14],
+    SCvol = Vol(SC_class, V=S21data[0, 14],
                 d=S21data[0, 25])
+    SCvol.SC.kbTc = 86.17 * S21data[0, 21]
+    SCvol.SC.rhon = rhon
+    
     if set_tesc:
         SCvol.set_tesc(Chipnum, KIDnum, **tesckwargs)
     return SCvol

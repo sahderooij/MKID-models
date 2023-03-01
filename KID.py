@@ -292,7 +292,7 @@ class KID(object):
             * 1e-6
             / (1 + (2 * np.pi * f * self.tqp_1 * 1e-6) ** 2)
         )
-        Sat = Sn * dAdNqp * dThetadNqp / (1 + (2 * np.pi * f * self.tqp_1 * 1e-6) ** 2)
+        Sat = Sn * dAdNqp * dThetadNqp / (1 + (2 * np.pi * f * self.tres * 1e-6) ** 2)
         return f, Sat
 
     # Plot functions
@@ -474,9 +474,9 @@ class S21KID(KID):
         kbT0=0.2 * 86.17,
         kbT=0.2 * 86.17,
         ak=0.0268,
-        SC=SC.Al(),
+        SCvol=SC.Vol(SC.Al(), .05, 15.),
     ):
-        super().__init__(Qc, hw0, kbT0, kbT, ak, d, SC)
+        super().__init__(Qc, hw0, kbT0, kbT, ak, d, SCvol)
         self.Qispl = interpolate.splrep(
             S21data[:, 1] * const.Boltzmann / const.e * 1e6, S21data[:, 4], s=0
         )
@@ -511,7 +511,7 @@ class S21KID(KID):
 
 ################################################################################
 def init_KID(
-    Chipnum, KIDnum, Pread, Tbath, Teffmethod="GR", wvl=None, S21=False, SC_class=SC.Al
+    Chipnum, KIDnum, Pread, Tbath, Teffmethod="GR", wvl=None, S21=False, SC_class=SC.Al, rhon=np.nan,
 ):
     """This returns an KID object, with the parameters initialized by 
     measurements on a physical KID. The effective temperature is set with an 
@@ -521,9 +521,9 @@ def init_KID(
     Qc = S21data[0, 3]
     hw0 = S21data[0, 5] * const.Planck / const.e * 1e12 * 1e-6
     kbT0 = const.Boltzmann / const.e * 1e6 * S21data[0, 1]
-    SC_inst = SC.init_SC(Chipnum, KIDnum, Pread, SC_class=SC_class)
+    SC_inst = SC.init_SCvol(Chipnum, KIDnum, rhon=rhon, SC_class=SC_class)
 
-    ak1 = calc.ak(S21data, SC_inst)
+    ak1 = calc.ak(S21data, SC_inst.SC)
 
     if Teffmethod == "GR":
         Temp = io.get_grTemp(TDparam, KIDnum, Pread)
@@ -533,15 +533,15 @@ def init_KID(
             taut[i] = calc.tau(freq, SPR)[0]
         tauspl = interpolate.splrep(Temp[~np.isnan(taut)], taut[~np.isnan(taut)])
         tau1 = interpolate.splev(Tbath, tauspl)
-        kbT = kidcalc.kbTbeff(tau1, SC_inst)
+        kbT = kidcalc.kbTbeff(tau1, SC_inst.SC)
     elif Teffmethod == "pulse":
         peakdata_ph, peakdata_amp = io.get_pulsedata(Chipnum, KIDnum, Pread, Tbath, wvl)
         tau1 = calc.tau_pulse(peakdata_ph)
-        kbT = kidcalc.kbTbeff(tau1, SC_inst)
+        kbT = kidcalc.kbTbeff(tau1, SC_inst.SC)
     elif Teffmethod == "Tbath":
         kbT = Tbath * 1e-3 * const.Boltzmann / const.e * 1e6
 
     if S21:
-        return S21KID(S21data, Qc=Qc, hw0=hw0, kbT0=kbT0, kbT=kbT, ak=ak1, SC=SC_inst)
+        return S21KID(S21data, Qc=Qc, hw0=hw0, kbT0=kbT0, kbT=kbT, ak=ak1, SCvol=SC_inst)
     else:
-        return KID(Qc=Qc, hw0=hw0, kbT0=kbT0, kbT=kbT, ak=ak1, SC=SC_inst)
+        return KID(Qc=Qc, hw0=hw0, kbT0=kbT0, kbT=kbT, ak=ak1, SCvol=SC_inst)

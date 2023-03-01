@@ -8,4 +8,4 @@ filters -- adjusts the PSDs with a certain filter, like deleting the amplifier n
 plot -- visualizes the (calculated) data.
 S21 -- Fits the resonator dips to get F0 and Q-factors.'''
 
-import kidata.calc, kidata.filters, kidata.io, kidata.noise, kidata.plot, kidata.pulse, kidata.IQ, kidata.S21
+from . import calc, io, noise, plot, pulse, IQ, S21, pulse, THz

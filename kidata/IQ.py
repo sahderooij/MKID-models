@@ -1,7 +1,7 @@
 """This module contains functions that handle IQ- and (amplitude,phase)-data-streams."""
 
 import matplotlib.pyplot as plt
-from scipy.ndimage.filters import uniform_filter1d
+from scipy.ndimage import uniform_filter1d
 import numpy as np
 from ipywidgets import interact
 import glob
@@ -92,7 +92,7 @@ def view_bins(path, coordinates='ampphase'):
         axs[1].plot(phase)
 
         axs[0].plot(amp, color="orange")
-        axs[1].set_xlabel("time (µs)")
+        axs[1].set_xlabel("time point")
 
     interact(
         plotbin, file=np.sort([i.split("\\")[-1]
