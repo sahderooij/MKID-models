@@ -70,9 +70,9 @@ def del_1fnNoise(freq, SPR, minn=0.35, plot=False):
     try:
         fit = curve_fit(
             lambda f, a, b: a * f ** (-b),
-            freq[~np.isnan(SPRn)][2:],
-            SPRn[~np.isnan(SPRn)][2:],
-            p0=(SPRn[~np.isnan(SPRn)][1:4].mean(), 1),
+            freq[~np.isnan(SPRn)][4:],
+            SPRn[~np.isnan(SPRn)][4:],
+            p0=(SPRn[~np.isnan(SPRn)][1:6].mean(), 1),
         )
         if fit[0][1] > minn:
             SPRn -= fit[0][0] * freq ** (-fit[0][1])
@@ -104,6 +104,9 @@ def del_otherNoise(freq, SPR, plot=False, del1fn=False):
     else:
         return del_1fNoise(*del_ampNoise(freq, SPR, plot=plot), plot=plot)
 
+def del_50Hz(freq, SPR):
+    mask = ((freq < 45) | (freq > 55)) & ((freq < 140) | (freq > 160))
+    return freq[mask], SPR[mask]
 
 def subtr_spec(freq, SPR, mfreq, mSPR, plot=False):
     """Subtract mSPR from SPR. Used to subtract off-resonance spectrum, 

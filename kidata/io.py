@@ -3,6 +3,7 @@ import pandas as pd
 import warnings
 import scipy.io
 import glob
+import re
 
 
 def get_datafld():
@@ -28,7 +29,7 @@ def get_datafld():
                 are the results of the average pulse calculation from 
                 kidata.pulse.calc_avgpulse().'''
 
-    datafld = "D:/MKIDdata/"
+    datafld = "E:/"
     assert glob.glob(datafld), 'data folder not found'
     return datafld
 
@@ -76,6 +77,25 @@ def read_dat(path):
                     (datdata['Data'][Temp], np.fromstring(line, sep='\t')))
 
     return datdata
+
+# General file finding
+def get_avlfiles(fld, ftype='.bin'):
+    filearray = np.array(
+            [
+                    '.'.join(i.replace("\\", '/').split("/")[-1].split('.')[:-1]).split("_")
+                for i in glob.iglob(fld + f'/*{ftype}')
+            ]
+        )
+    return np.unique(filearray, axis=0)
+
+def get_avlfileids(fld, ftype='.bin'):
+    files = get_avlfiles(fld, ftype=ftype)
+    bins = np.unique(np.array([[float(str(re.sub('[^\d\.]', '', j) or 0)) 
+                                for j in i]
+                     for i in files]), axis=0)
+    bindf = pd.DataFrame(bins)
+    bindf.sort_values(list(bindf.columns))
+    return bindf.values
 
 # S21
 
@@ -136,17 +156,6 @@ def get_S21data(Chipnum, KIDnum, Pread=None):
 
 # Pulse
 
-
-def get_avlbins(folder):
-    bins = np.unique(np.array([[int(i.split('\\')[-1].split('_')[0][3:]),
-                      int(i.split('\\')[-1].split('_')[1][:-3]),
-                      int(i.split('\\')[-1].split('_')[4][3:-4])]
-                     for i in glob.iglob(folder + '/*.bin')]), axis=0)
-    bindf = pd.DataFrame(bins, columns=['KID', 'Pread', 'T']).sort_values(
-        by=['KID', 'Pread', 'T'])
-    return bindf.values
-
-
 def get_bin(folder, KID, Pread, T, strm):
     if type(strm) != str:
         return np.fromfile(
@@ -158,7 +167,7 @@ def get_bin(folder, KID, Pread, T, strm):
             dtype=">f8").reshape(-1, 2)
 
 
-def get_avgpulse(Chipnum, KID, Pread, T, wvl, subfolder='', std=False, coord='ampphase'):
+def get_avgpulse(Chipnum, KID, Pread, wvl, T, subfolder='', std=False, coord='ampphase'):
     '''Returns the amplitude and phase data (in that order)
     of the average pulse, calculated from kidata.pulse.calc_avgpulse.
     Note: the baseline is subtracted from amplitude.
@@ -175,7 +184,7 @@ def get_avgpulse(Chipnum, KID, Pread, T, wvl, subfolder='', std=False, coord='am
     return data[:, ind], data[:, ind + 2]
 
 
-def get_avgpulseinfo(Chipnum, KID, Pread, T, wvl, subfolder='', coord='ampphase'):
+def get_avgpulseinfo(Chipnum, KID, Pread, wvl, T, subfolder='', coord='ampphase'):
     '''Returns the stream number (vis{nr}), location and prominence of
     the peaks used in the kidata.pulse.calc_avgpulse() function.'''
     strms, locs, proms = np.genfromtxt(
@@ -224,9 +233,14 @@ def get_pulseTemp(Chipnum, KIDnum, Pread, wvl, subfolder=''):
                           get_datafld() +
                           f'{Chipnum}\\Pulse\\{wvl}nm\\{subfolder}KID{KIDnum}_{Pread}dBm*.csv')])
 
+def get_pulsefits(Chipnum, KIDnum, Pread, wvl, subfolder=''):
+    '''Returns the fitted values of the nonexp pulse fits in Pulse/wvl/fits'''
+    return np.loadtxt(get_datafld() 
+              + f'{Chipnum}/Pulse/{wvl}nm/{subfolder}fits/KID{KIDnum}_{Pread}dBm_.csv',
+             delimiter=',', ndmin=2) 
+
 
 # GR Noise
-
 
 def get_noiseS21dat(Chipnum, KIDnum, Pread=None, dB=True, subfld='2D'):
     '''Returns the content of the raw .dat-file of the S21-sweep in the FFT/2D folder.
@@ -235,7 +249,7 @@ def get_noiseS21dat(Chipnum, KIDnum, Pread=None, dB=True, subfld='2D'):
     if Pread is None:
         Pread = get_grPread(get_grTDparam(Chipnum), KIDnum)[0]
     datafld = get_datafld()
-    path = datafld + f"{Chipnum}/Noise_vs_T/FFT/{subfld}/KID{KID}_{Pread}dBm__{'S21dB' if dB else 'S21'}.dat"
+    path = datafld + f"{Chipnum}/Noise_vs_T/FFT/{subfld}/KID{KIDnum}_{Pread}dBm__{'S21dB' if dB else 'S21'}.dat"
     return read_dat(path)
 
 
@@ -259,7 +273,51 @@ def get_noisebin(Chipnum, KIDnum, Pread=None, T=None, freq='med', subfld='2D'):
         f"{Chipnum}/Noise_vs_T/TD_{subfld}/KID{int(KIDnum)}_{int(Pread)}dBm__TD{freq}_TmK{int(T)}.bin"
     return np.fromfile(path, dtype='>f8').reshape(-1, 2)
 
+def get_noisePSD(Chipnum, KIDnum, Pread, T, subfld='2D', fld='Noise_vs_T'):
+    '''returns the calculated spectra from .csv file in the _PSDs folder'''
+    return np.loadtxt(get_datafld() 
+                      + f'{Chipnum}/{fld}/TD_{subfld}_PSDs/KID{KIDnum}_{Pread}dBm__TmK{T}.csv',
+                     delimiter=',', ndmin=2)
 
+def get_noisefits(Chipnum, KIDnum, Pread, subfld='2D'):
+    return np.loadtxt(get_datafld() 
+                  + f'{Chipnum}/Noise_vs_T/TD_{subfld}_PSDs/fits/KID{KIDnum}_{Pread}dBm_.csv',
+                 delimiter=',', ndmin=2)
+
+def get_noiseKIDPrT(Chipnum, subfld='2D'):
+    avlfiles = get_avlfiles(get_datafld()
+                            + f'{Chipnum}/Noise_vs_T/TD_{subfld}_PSDs',
+                           ftype='.csv')
+    return np.unique([[int(i[0][3:]), int(i[1][:-3]), int(i[3][3:])] 
+                      for i in avlfiles], axis=0)
+
+# THz measurement
+def get_THzKIDPrTTBB(Chipnum):
+    avlfiles = get_avlfiles(get_datafld()
+                            + f'{Chipnum}/THz/TD_optNEP2D_BB_PSDs/',
+                           ftype='.csv')
+    return np.unique([[int(i[0][3:]), int(i[1][:-3]), 
+                       float(i[2][5:])*1e3, int(i[3][3:])] 
+                  for i in avlfiles], axis=0)
+    
+def get_THzPSD(Chipnum, KIDnum, Pread, T, TBB):
+    '''returns the spectrum in the .csv file in THz/TD_optNEP2D_BB_PSDs folder.
+    Give TBB in K and it will find the file that is closest in TmK<>.csv'''
+    fld = get_datafld() + f'{Chipnum}/THz/TD_optNEP2D_BB_PSDs/'
+    csvs = get_avlfiles(fld, ftype=f'KID{KIDnum}_{Pread}dBm_Tchip{(T*1e-3):.2f}*.csv')
+    csv = csvs[np.abs(TBB - np.array([(float(i[3:])*1e-3) for i in csvs[:, -1]])).argmin(), :]
+    if np.abs(TBB - np.array([(float(i[3:])*1e-3) for i in csvs[:, -1]])).min() > 1:
+        warnings.warn('\nGiven TBB and TBB of data differ by more than 1 K: \n'
+                      f' TBB = {TBB} K, TBB_data = {float(csv[-1][3:])*1e-3} K')
+    return np.loadtxt(fld + '_'.join(csv) + '.csv',
+                     delimiter=',')
+
+def get_THzfits(Chipnum, KIDnum, Pread, T):
+    return np.loadtxt(get_datafld() 
+                  + f'{Chipnum}/THz/TD_optNEP2D_BB_PSDs/fits/KID{KIDnum}_{Pread}dBm_Tchip{(T*1e-3):.2f}.csv',
+                 delimiter=',')
+
+## OLD .MAT handling
 def get_grTDparam(Chipnum, version=None):
     '''Returns the data struct from the .mat-file generated by noise post-processing.
     version controles the trailing description of the TDresults.mat file as: TDresults_{version}.mat'''

@@ -12,8 +12,8 @@ from scipy.signal import deconvolve
 import SCtheory as SCth
 import SC as SuperCond
 
-from kidata import io
-from kidata.plot import _selectPread
+from kidata import io, noise
+from kidata.plot import selectPread
 
 
 # NOTE: all units are in 'micro': µeV, µm, µs etc.
@@ -336,7 +336,7 @@ def tesc(
         if pltfit:
             print("{} KID{} -{} dBm T={} mK".format(Chipnum, KIDnum, Pread, Temp[i]))
         freq, SPR = io.get_grdata(TDparam, KIDnum, Pread, Temp[i])
-        tqpstar[i], tqpstarerr[i] = tau(freq, SPR, plot=pltfit)
+        tqpstar[i], tqpstarerr[i] = noise.fit.Lorspec(freq, SPR, plot=pltfit)[:2]
 
         if tqpstarerr[i] / tqpstar[i] > relerrthrs or (
             tqpstar[i] > taunonkaplan or tqpstar[i] < taures
@@ -385,7 +385,7 @@ def tesc(
             )
         except ValueError:
             T = np.linspace(minTemp, maxTemp, 100)
-        taukaplan = SCth.tau_kaplan(T * 1e-3, SCvol)
+        taukaplan = SCth.tau.qpstar(T * 1e-3, SCvol)
         plt.plot(T, taukaplan)
         plt.yscale("log")
         plt.ylim(None, 1e4)

@@ -1,10 +1,14 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.mlab as mlab
 from scipy.signal import find_peaks
+from scipy.stats import norm
+
 import pandas as pd
 from IPython.display import clear_output
 from ipywidgets import interact
 import glob
+import os
 from tqdm.notebook import tnrange
 import warnings
 from scipy.signal import savgol_filter
@@ -30,7 +34,9 @@ def calc_pulseavg(
         (the linear or non-linear, Smith, coordinates)."""
 
     if KIDPrT is None:
-        KIDPrT = io.get_avlbins(filelocation)
+        KIDPrT = np.unique(
+            io.get_avlfileids(filelocation)[:, (0, 1, 4)].astype(int), 
+            axis=0)
 
     n_streams = np.array(
         [
@@ -43,7 +49,13 @@ def calc_pulseavg(
     ).max()
 
     if save_location is None:
-        save_location = "\\".join(glob.glob(filelocation)[0].split("\\")[:-1])
+        parentfld = "\\".join(glob.glob(filelocation)[0].split("\\")[:-1])
+        fldnmlist = parentfld.split('\\')[-1].split(' ')
+        wvl = np.array(fldnmlist)[[('nm' in i) for i in fldnmlist]]
+        save_location = '\\'.join(parentfld.split('\\')[:-1]) + f'\\{wvl[0]}'
+        if not os.path.exists(save_location):
+            os.mkdir(save_location)
+        
 
     if minmax_proms is None:
         minmax_proms = select_proms(filelocation, KIDPrT, pulse_len, 5, coord)
@@ -185,37 +197,26 @@ def select_proms(filelocation, KIDPrT=None, pulse_len=2e3, nstream=5, coord='amp
                         amp, phase = to_ampphase(data)
                     elif coord == 'RX':
                         amp, phase = to_RX(data)
-                    std = np.std(phase)
-                    # multiplier = 4
                     peaks, peakheight = find_peaks(
-                        phase, prominence=np.percentile(phase, 99.95))
+                        phase, prominence=np.percentile(phase, 99.99))
                     prominences = peakheight["prominences"]
-#                     maxpulses = len(phase)/pulse_len
-#                     minpulses = 100
-#                     while len(peaks) < minpulses:
-#                         multiplier -= 1
-#                         peaks, peakheight = find_peaks(
-#                             phase, prominence=multiplier * std
-#                         )
-
-#                     while len(peaks) > maxpulses/2:
-#                         multiplier += 0.2
-#                         mask = (prominences) > (multiplier * std)
-#                         peaks = peaks[mask]
-#                         prominences = prominences[mask]
                     total_prominences = np.append(
                         total_prominences, prominences, 0)
+                mu, sigma = norm.fit(total_prominences)
 
                 plt.figure()
                 plt.plot(phase)
                 plt.plot(peaks, phase[peaks], 'r.')
                 plt.title(f"KID{KID}, {temp} mK, {Pread} dBm")
                 plt.figure()
-                plt.hist(total_prominences, bins=30)
+                n, bins, patches = plt.hist(total_prominences, bins=30, density=True)
+                y = norm.pdf(bins, mu, sigma)
+                plt.plot(bins, y, 'r--', label='Gaussian fit')
                 plt.title("Histogram of found peaks")
+                plt.legend()
                 plt.show()
-                minp = float(input(f"Lower bound (enter for {minp})") or minp)
-                maxp = float(input(f"Upper bound (enter for {maxp})") or maxp)
+                minp = float(input(f"Lower bound (enter for {(mu - 2*sigma):.3f})") or mu - 2*sigma)
+                maxp = float(input(f"Upper bound (enter for {(mu + 2*sigma):.3f})") or mu + 2*sigma)
                 minmax_proms[KID][Pread][temp] = (minp, maxp)
     clear_output()
     return minmax_proms

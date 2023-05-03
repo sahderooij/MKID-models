@@ -7,28 +7,30 @@ from tqdm.notebook import tnrange
 import warnings
 import os
 
-from kidata import io, calc
-from . import filters, fit
+from kidata import io
+from . import filters, fit, plot
 from kidata.IQ import to_ampphase, subtr_offset, smooth
 
 
-def calc_PSDs(datafld, ppd=30, nrseg=32, nrsgm=6, stitchfreq=2e4, resultpath=None):
-    KIDPrTTBB = np.unique(
-        np.array(
-            [
-                    '.'.join(i.split("\\")[-1].split('.')[:-1]).split("_")
-                for i in glob.iglob(datafld + "/*.bin")
-            ]
-        ),
-        axis=0,
-    )
-    KIDPrTTBB = np.delete(KIDPrTTBB, 3, 1)
-    KIDs = np.unique(KIDPrTTBB[:, 0])
+def calc_PSDs(datafld, ppd=30, nrseg=32, nrsgm=6, stitchfreq=2e4, resultpath=None,
+             overwrite=True, plotfail=True):
+    KIDPrTTBB = io.get_avlfiles(datafld)
+    KIDPrTTBB = np.delete(KIDPrTTBB, 3, 1) #delete the column for TDfastt and TDslow/TDmed
+    
     if resultpath is None:
         resultpath = datafld + '_PSDs'
     if not os.path.exists(resultpath):
         os.mkdir(resultpath)
-        
+    
+    if not overwrite:
+        #only calculate PSDs that are not in resultpath
+        PSDfiles = io.get_avlfiles(resultpath, ftype='.csv')
+        KIDPrTTBB = KIDPrTTBB[
+            [KIDPrTTBB[i, :].tolist() not in PSDfiles.tolist() 
+             for i in range(len(KIDPrTTBB[:, 0]))],
+            :]
+    
+    KIDs = np.unique(KIDPrTTBB[:, 0])
     for k in tnrange(len(KIDs), desc="KID", leave=False):
         Preads = np.unique(KIDPrTTBB[KIDPrTTBB[:, 0] == KIDs[k], 1])
         for p in tnrange(len(Preads), desc="Pread", leave=False):
@@ -70,8 +72,9 @@ def calc_PSDs(datafld, ppd=30, nrseg=32, nrsgm=6, stitchfreq=2e4, resultpath=Non
                             else:
                                 nperseg = 'seglen'   
                             dataid = (f"{KIDs[k]}, -{Preads[p]}, {Tbaths[t]},"
-                                      + f"{TBBs[tb]}, {sfreqs[i]:.0f} Hz")
-                            freqs[i], Saas[i], Spps[i], Saps[i] = PSDs(amp, phase, sfreqs[i], nperseg, nrsgm, nrseg, dataid)
+                                      + f"{TBBs[tb]}, {sfreqs[i]:.0e} Hz")
+                            freqs[i], Saas[i], Spps[i], Saps[i] = PSDs(
+                                amp, phase, sfreqs[i], nperseg, nrsgm, nrseg, dataid, plotfail)
 
                     if len(files) == 2:
                         slowind = sfreqs.argmin()
@@ -99,7 +102,7 @@ def calc_PSDs(datafld, ppd=30, nrseg=32, nrsgm=6, stitchfreq=2e4, resultpath=Non
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore", RuntimeWarning)
                         np.savetxt(resultpath 
-                                   + f'\\{KIDs[k]}_{Preads[p]}'
+                                   + f'/{KIDs[k]}_{Preads[p]}'
                                    + f"_{Tbaths[t]}_{TBBs[tb]}.csv",
                                    np.array([f, 
                                     10*np.log10(Saa.real), 
@@ -116,23 +119,32 @@ def calc_PSDs(datafld, ppd=30, nrseg=32, nrsgm=6, stitchfreq=2e4, resultpath=Non
                                    delimiter=',')
     
                     
-def PSDs(amp, phase, sfreq, nperseg, nrsgm, nrseg, dataid):
+def PSDs(amp, phase, sfreq, nperseg, nrsgm, nrseg, dataid, plotfail=True):
     # check if there are pulses and reject those parts
     spamp, rejectedamp = rej_pulses(
         amp,
         nrsgm=nrsgm,
         nrseg=nrseg,
-        sfreq=sfreq,
-        smoothdata=(int(sfreq) == int(1e6)),
+        sfreq=sfreq
     )
     spphase, rejectedphase = rej_pulses(
         phase,
         nrsgm=nrsgm,
         nrseg=nrseg,
-        sfreq=sfreq,
-        smoothdata=(int(sfreq) == int(1e6)),
+        sfreq=sfreq
     )
     rejected_or = rejectedamp | rejectedphase
+    
+    if all(rejected_or):
+        warnings.warn("All parts are rejected, returning nans")
+        if plotfail:
+            plt.figure()
+            t = np.arange(len(amp)) / sfreq
+            plt.plot(t, amp)
+            plt.plot(t, phase)
+            plt.title(dataid)
+            plt.show()
+            plt.close()
     
     # amp:
     afreq, Saa = avgPSD(
@@ -140,7 +152,7 @@ def PSDs(amp, phase, sfreq, nperseg, nrsgm, nrseg, dataid):
         rejected_or,
         sfreq=sfreq,
         nperseg=nperseg,
-        dataid=dataid,
+        dataid=dataid
     )
     # phase:
     pfreq, Spp = avgPSD(
@@ -148,7 +160,7 @@ def PSDs(amp, phase, sfreq, nperseg, nrsgm, nrseg, dataid):
         rejected_or,
         sfreq=sfreq,
         nperseg=nperseg,
-        dataid=dataid,
+        dataid=dataid
     )
     # cross:
     apfreq, Sap = avgPSD(
@@ -157,9 +169,9 @@ def PSDs(amp, phase, sfreq, nperseg, nrsgm, nrseg, dataid):
         spamp,
         sfreq=sfreq,
         nperseg=nperseg,
-        dataid=dataid,
+        dataid=dataid
     )
-    if any(afreq != pfreq) or any(pfreq != apfreq):
+    if any(afreq != pfreq) or any(pfreq != apfreq) and ~all(rejected_or):
         warnings.warn('different frequencies from avgPSD, writing nans')
         freq = np.full(len(afreq), np.nan)
     else:
@@ -182,30 +194,30 @@ def rej_pulses(data, nrsgm=6, nrseg=32, sfreq=50e3, smoothdata=False, plot=False
     The splitted input data and a list of booleans which segments are rejected."""
 
     if smoothdata:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            freq, PSD = welch(data, sfreq, "hamming", nperseg=len(data))
-            smf, smPSD = logsmooth(freq, PSD, ppd=32)
-            smf, smPSD = filters.del_ampNoise(
-                np.real(smf), np.real(10 * np.log10(smPSD))
+        freq, PSD = welch(data, sfreq, "hamming", nperseg=len(data))
+        smf, smPSD = logsmooth(freq, PSD, ppd=32)
+        smf, smPSD = filters.del_ampNoise(
+            np.real(smf), np.real(10 * np.log10(smPSD))
+        )
+        smf, smPSD = filters.del_1fnNoise(smf, smPSD)
+        tau, tauerr = fit.Lorspec(smf, smPSD, startf=1e3, stopf=1e5)[:2]
+        if tauerr / tau >= 0.2 or np.isnan(tau):
+            warnings.warn(
+                "Could not estimate lifetime from PSD, no smoothing is used."
             )
-            smf, smPSD = filters.del_1fnNoise(smf, smPSD)
-            tau, tauerr = calc.tau(smf, smPSD, startf=1e3, stopf=1e5)
-            if tauerr / tau >= 0.2 or np.isnan(tau):
-                warnings.warn(
-                    "Could not estimate lifetime from PSD, no smoothing is used."
-                )
-                smdata = data
-            else:
-                tau *= 1e-6
-                smdata = smooth(data, tau, sfreq)
+            smdata = data
+        else:
+            tau *= 1e-6
+            smdata = smooth(data, tau, sfreq)
     else:
         smdata = data
-
-    corrdata = subtr_offset(smdata)
-    spdata = np.array(np.array_split(corrdata, nrseg))
-    thrshld = nrsgm * spdata.std(1).min()
-    reject = np.abs(spdata).max(1) > thrshld
+    
+    spdata = np.array(np.array_split(smdata, nrseg))
+    corrdata = np.zeros((nrseg, len(spdata[0])))
+    for i in range(nrseg):
+        corrdata[i, :] = subtr_offset(spdata[i])
+    thrshld = nrsgm * corrdata.std(1).min()
+    reject = np.abs(corrdata).max(1) > thrshld
 
     if plot:
         fig, ax = plt.subplots()
@@ -217,6 +229,11 @@ def rej_pulses(data, nrsgm=6, nrseg=32, sfreq=50e3, smoothdata=False, plot=False
                 color="b",
                 alpha=0.5 if reject[ind] else 1,
             )
+            ax.plot(
+                (t0 + np.arange(len(spdata[ind]))) / sfreq,
+                corrdata[ind],
+                color='orange',
+                alpha=0.5 if reject[ind] else 1)
             t0 += len(spdata[ind])
         ax.plot(
             np.arange(len(data)) / sfreq,
@@ -277,14 +294,6 @@ def avgPSD(
         )
         return f, psds.mean(0)
     else:
-        warnings.warn("All parts are rejected, returning nans")
-        plt.figure()
-        t = np.arange(len(dataarr.flatten())) / sfreq
-        plt.plot(t, dataarr.flatten())
-        plt.plot(t, dataarr1.flatten())
-        plt.title(dataid)
-        plt.show()
-        plt.close()
         return np.full([2, 1], np.nan)
 
 

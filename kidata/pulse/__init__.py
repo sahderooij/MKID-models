@@ -1,1 +1,1 @@
-from kidata.pulse import analysis, fit, models
+from kidata.pulse import analysis, fit

@@ -8,22 +8,29 @@ import glob
 
 
 def norm_radius(data):
-    '''Normalize the of the circle to 1. It uses the mean radius of the whole bin file.'''
+    '''Normalize the of the circle to 1. It uses the mean radius of all the data.'''
     return data / np.sqrt(data[:, 0] ** 2 + data[:, 1] ** 2).mean()
 
-def to_ampphase(data):
+def to_ampphase(data, S21circle=None):
     """Converts the I and Q variables from the raw .dat file to (normalized)
-    amplitude and phase.
+    amplitude and phase. It assumes that I and Q are calibrated, i.e.
+    the circle is rotated and centred around (0, 0).
+    If S21circle is passed, it gets the radius of the circle from that data.
     Takes:
     data loaded by np.fromfile(path,dtype='>f8').reshape(-1,2)
 
     Returns:
     Amplitude, Phase: numpy arrays"""
     
-    ndata = norm_radius(data)
-    Amp = np.sqrt(ndata[:, 0] ** 2 + ndata[:, 1] ** 2)
-    Phase = np.pi - (np.arctan2(ndata[:, 1], ndata[:, 0]) % (2 * np.pi))
+    if S21circle is None:
+        ndata = norm_radius(data)
+        Amp = np.sqrt(ndata[:, 0] ** 2 + ndata[:, 1] ** 2)
+        Phase = np.pi - (np.arctan2(ndata[:, 1], ndata[:, 0]) % (2 * np.pi))
+    else:
+        Amp = np.sqrt(data[:, 0] ** 2 + data[:, 1] ** 2) / S21circle.r0
+        Phase = np.pi - (np.arctan2(data[:, 1], data[:, 0]) % (2 * np.pi))
     return Amp, Phase
+
 
 
 def to_RX(data):
@@ -36,8 +43,8 @@ def to_RX(data):
     
 
 def subtr_offset(data, plot=False):
-    """Subtracts a quadratic offset from a time stream (data) to compensate
-    temperature drifts.
+    """Subtracts a 3rd order polynomial (arbritrary) offset from 
+    a time stream (data) to compensate temperature drifts.
     Optionally plots the quadratic fit."""
     t = np.arange(len(data))
     p = np.polyfit(
@@ -65,7 +72,8 @@ def smooth(data, tau, sfreq):
     return uniform_filter1d(data, wnd, mode="wrap")
 
 
-def view_bins(path, coordinates='ampphase'):
+def view_bins(path, coordinates='ampphase', sel='',
+             smoothdata=False, tau=100e-6, sfreq=1e6):
     """A functions that plots the amplitude and phase from IQ data streams that
     are found in the folder indicated by path. Needs matplotlib widget
     back-end."""
@@ -89,12 +97,14 @@ def view_bins(path, coordinates='ampphase'):
             amp, phase = (data[:, 0], data[:, 1])
             axs[1].set_ylabel("Q (norm.)")
             axs[0].set_ylabel("I (norm.)")
+        if smoothdata:
+            amp = smooth(amp, tau, sfreq)
+            phase = smooth(phase, tau, sfreq)
         axs[1].plot(phase)
-
         axs[0].plot(amp, color="orange")
         axs[1].set_xlabel("time point")
 
     interact(
         plotbin, file=np.sort([i.split("\\")[-1]
-                              for i in glob.iglob(path + "\\*.bin")])
+                              for i in glob.iglob(path + f"\\*{sel}*.bin")])
     )

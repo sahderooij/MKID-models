@@ -136,6 +136,11 @@ class Superconductor(object):
     def cs(self):
         '''effective 3D speed of sound'''
         return (3/(2/self.cT**3 + 1/self.cL**3))**(1/3)
+    
+    @property
+    def phmfp(self):
+        '''phonon mean free path against pair-breaking (in µm)'''
+        return self.cs * self.tpb
 
 
 ###################### The superconductor objects ##########################
@@ -169,12 +174,12 @@ Al = Superconductor('Al',
 
 
 # tpb is calculated with Kaplan formula for tph0, with N and N(0) from 
-# Abadias2019.
+# Abadias2019 and <a^2>_av from aTa 
 # tau0 is calculated from the power law GR noise lifetimes in LT192,
 #     CPWs with tau0 = 4.2 tau_GR(Tc) (see Kaplan1979)
 # EF, N0 and vF are calculated with the free electron model, 
 #     with the results from the magnetoresistance experiments.
-# The res are constants for Ta from Abadias2019 and Magnuson2019
+# The rest are constants for Ta from Abadias2019 and Magnuson2019
 bTa = Superconductor('bTa', 
                      Tc=1.,
                      rhon=206.,
@@ -196,7 +201,7 @@ aTa = Superconductor('aTa',
                      N0=5.7e4,
                      kF=1.6e4,
                      t0=1.78e-3,
-                     tpb=.015e-3,
+                     tpb=.0227e-3,
                      cL=3.9e3,
                      cT=2.01e3,
                      rho=17.1e3)

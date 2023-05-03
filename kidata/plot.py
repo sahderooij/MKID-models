@@ -14,7 +14,7 @@ from kidata import noise
 import SCtheory as SCth
 
 
-def _selectPread(pltPread, Preadar):
+def selectPread(pltPread, Preadar):
     """Function that returns a Pread array, depending on the input pltPread."""
     if type(pltPread) is str:
         if pltPread == "min":
@@ -48,731 +48,109 @@ def _selectPread(pltPread, Preadar):
     return Pread
 
 
-def spec(
-    Chipnum,
-    KIDlist=None,
-    pltPread="all",
-    spec="all",
-    lvlcomp="",
-    version=None,
-    SCvol=None,
-    SCkwargs={},
-    clbar=True,
-    cmap=None,
-    norm=None,
-    del1fNoise=False,
-    delampNoise=False,
-    del1fnNoise=False,
-    suboffres=False,
-    plttres=False,
-    Tminmax=(0, 500),
-    ax12=None,
-    xlim=(None, None),
-    ylim=(None, None),
-    **kwargs
-):
-    """Plots PSDs of multiple KIDs, read powers and temperatures (indicated by color). Every KID has a new figure, which is returned if only one KID is plotted.
-    lvlcomp specifies how the noise levels should be compensated (will be a different function in the future). 
-        Use Resp to divide by responsivity and obtain quasiparticle fluctuations.
-        Use Resptres to compensate for the factor (1+(omega*taures)^2) and get the quasiparticle fluctuations.
-    plttres will plot an arrow at the frequencies corresponding to the resonator ring time."""
-    TDparam = io.get_grTDparam(Chipnum, version)
-    if suboffres:
-        TDparamoffres = io.get_grTDparam(Chipnum, version='offres')
-
-    if KIDlist is None:
-        KIDlist = io.get_grKIDs(TDparam)
-    elif type(KIDlist) is int:
-        KIDlist = [KIDlist]
-
-    if spec == "all":
-        specs = ["cross", "amp", "phase"]
-    elif type(spec) == list:
-        specs = spec
-    elif spec == 'allcross':
-        specs = ['cross', 'crosspos', 'crossimagneg', 'crossimagpos']
-    else:
-        raise ValueError("Invalid Spectrum Selection")
-
-    for KIDnum in KIDlist:
-        if lvlcomp != "":
-            if SCvol is None:
-                SCvol = SuperCond.init_SCvol(Chipnum, KIDnum, **SCkwargs)
-        else:
-            SCvol = SuperCond.Vol(SuperCond.Al, np.nan, np.nan)
-            
-        Preadar = _selectPread(pltPread, io.get_grPread(TDparam, KIDnum))
-        if ax12 is None:
-            fig, axs = plt.subplots(
-                len(Preadar),
-                len(specs),
-                figsize=(4 * len(specs), 4 * len(Preadar)),
-                sharex=True,
-                sharey=True,
-                squeeze=False,
-            )
-            fig.suptitle(f"{Chipnum}, KID{KIDnum}")
-        else:
-            axs = ax12
-            
-        if cmap is None or norm is None:
-            # get max and min of all Temps
-            minTemps, maxTemps = np.zeros((2,len(Preadar)))
-            for i, Pread in enumerate(Preadar):
-                Temp = io.get_grTemp(TDparam, KIDnum, Pread)
-                minTemps[i], maxTemps[i] = (Temp.min(), Temp.max())
-            
-            cmap = matplotlib.cm.get_cmap("viridis")
-            norm = matplotlib.colors.Normalize(
-                np.max([minTemps.min(), Tminmax[0]]),
-                np.min([maxTemps.max(), Tminmax[1]]))
-
-        for ax1, Pread in zip(range(len(Preadar)), Preadar):
-
-            axs[ax1, 0].set_ylabel("PSD (dBc/Hz)")
-            Temp = io.get_grTemp(TDparam, KIDnum, Pread)
-            if suboffres:
-                Temp = np.intersect1d(Temp, io.get_grTemp(TDparamoffres, KIDnum, Pread))
-
-            Temp = Temp[np.logical_and(Temp < Tminmax[1], Temp > Tminmax[0])]
-            if clbar:
-                clb = plt.colorbar(
-                    matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axs[ax1, -1]
-                )
-                clb.ax.set_title("T (mK)")
-            if plttres:
-                S21data = io.get_S21data(Chipnum, KIDnum, Pread)
-
-            for i in range(len(Temp)):
-                for (ax2, spec) in zip(range(len(specs)), specs):
-                    lvlcompspl = calc.NLcomp(
-                        Chipnum, KIDnum, Pread, SCvol=SCvol, method=lvlcomp, var=spec
-                    )
-                    freq, SPR = io.get_grdata(
-                        TDparam, KIDnum, Pread, Temp[i], spec=spec
-                    )
-                    if suboffres:
-                        orfreq, orSPR = io.get_grdata(
-                            TDparamoffres, KIDnum, Pread, Temp[i], spec=spec
-                        )
-                        freq, SPR = noise.filters.subtr_spec(freq, SPR, orfreq, orSPR)
-
-                    if delampNoise:
-                        freq, SPR = noise.filters.del_ampNoise(freq, SPR)
-                    if del1fNoise:
-                        freq, SPR = noise.filters.del_1fNoise(freq, SPR)
-                    if del1fnNoise:
-                        freq, SPR = noise.filters.del_1fnNoise(freq, SPR)
-
-                    SPR[SPR == -140] = np.nan
-                    SPR[SPR == -np.inf] = np.nan
-
-                    SPR = 10 * np.log10(
-                        10 ** (SPR / 10) / interpolate.splev(Temp[i] * 1e-3, lvlcompspl)
-                    )
-
-                    axs[ax1, ax2].plot(freq, SPR, color=cmap(norm(Temp[i])), **kwargs)
-                    axs[ax1, ax2].set_xscale("log")
-                    axs[ax1, ax2].set_title(spec + ", -{} dBm".format(Pread))
-                    axs[-1, ax2].set_xlabel("Freq. (Hz)")
-
-                    if plttres:
-                        Tind = np.abs(S21data[:, 1] - Temp[i] * 1e-3).argmin()
-                        fring = S21data[Tind, 5] / (2 * S21data[Tind, 2])
-                        axs[ax1, ax2].axvline(fring, linestyle='--',
-                                              color=cmap(norm(Temp[i])))
-        axs[0, 0].set_xlim(*xlim)
-        axs[0, 0].set_ylim(*ylim)
-    #         plt.tight_layout()
-    if ax12 is None and len(KIDlist) == 1:
-        return fig, axs
-
-
-def ltnlvl(
-    Chipnum,
-    KIDlist=None,
-    pltPread="all",
-    spec="cross",
-    Tminmax=None,
-    startstopf=(None, None),
-    lvlcomp="",
-    pltTTc=False,
-    delampNoise=False,
-    del1fNoise=False,
-    del1fnNoise=False,
-    suboffres=False,
-    relerrthrs=0.1,
-    pltKIDsep=True,
-    pltthlvl=False,
-    pltkaplan=False,
-    pltthmlvl=False,
-    plttres=False,
-    plttscat=False,
-    fig=None,
-    ax12=None,
-    color="Pread",
-    pltclrbar=True,
-    fmt="-o",
-    label=None,
-    SCvol=None,
-    SCkwargs={},
-    showfit=False,
-    savefig=False,
-):
-    """Plots the results from a Lorentzian fit to the PSDs of multiple KIDs, read powers and temperatures. 
-    Two axes: 0: lifetimes 1: noise levels, both with temperature on the x-axis. The color can be specified and
-    is Pread by default. 
-    Options:
-    startstopf -- defines the fitting window
-    lvlcomp -- defines how the levels are compensated. Use Resp for responsivity compensation.
-        (will be moved in the future)
-    del{}Noise -- filter spectrum before fitting.
-    relerrthrs -- only plot fits with a relative error threshold in lifetime less than this.
-    pltKIDsep -- if True, different KIDs get a new figure.
-    pltthlvl -- expected noise level is plotted as dashed line
-    pltkaplan -- a kaplan fit (tesc as parameter) is plotted in the lifetime axis.
-    pltthmfnl -- a noise level from the fitted lifetime and theoretical Nqp is plotted as well
-    plttres -- the resonator ring time is plotted in the lifetime axis.
-    ... multiple figure handling options ...
-    ... options for the tesc deteremination ...
-    showfit -- the fits are displayed in numerous new figures, for manual checking."""
-
-    def _make_fig():
-        fig, axs = plt.subplots(1, 2, figsize=(8, 3))
-        return fig, axs
-
-    def _get_cmap(**kwargs):
-        if color == "Pread":
-            cmap = matplotlib.cm.get_cmap("plasma")
-            norm = matplotlib.colors.Normalize(
-                -1.05 * kwargs["Preadar"].max(), -0.95 * kwargs["Preadar"].min()
-            )
-            if pltclrbar:
-                clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap))
-                clb.ax.set_title(r"$P_{read}$ (dBm)")
-        elif color == "Pint":
-            cmap = matplotlib.cm.get_cmap("plasma")
-            norm = matplotlib.colors.Normalize(
-                kwargs["Pintar"].min(), kwargs["Pintar"].max()
-            )
-            if pltclrbar:
-                clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap))
-                clb.ax.set_title(r"$P_{int}$ (dBm)")
-        elif color == "V":
-            cmap = matplotlib.cm.get_cmap("cividis")
-            norm = matplotlib.colors.Normalize(
-                np.array(list(Vdict.values())).min(),
-                np.array(list(Vdict.values())).max(),
-            )
-            if pltclrbar:
-                clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap))
-                clb.ax.set_title(r"Al Vol. ($\mu m^3$)")
-        elif color == "KIDnum":
-            cmap = matplotlib.cm.get_cmap("Paired")
-            norm = matplotlib.colors.Normalize(
-                np.array(KIDlist).min(), np.array(KIDlist).max()
-            )
-            if pltclrbar:
-                clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap))
-                clb.ax.set_title("KID nr.")
-        else:
-            raise ValueError("{} is not a valid variable as color".format(color))
-        return cmap, norm
-
-    TDparam = io.get_grTDparam(Chipnum)
-    if suboffres:
-        TDparamoffres = io.get_grTDparam(Chipnum, offres=True)
-
-    if KIDlist is None:
-        KIDlist = io.get_grKIDs(TDparam)
-    elif type(KIDlist) is int:
-        KIDlist = [KIDlist]
-
-    if color == "Pint":
-        Pintdict = io.get_Pintdict(Chipnum)
-
-    if not pltKIDsep:
-        if ax12 is None:
-            fig, axs = _make_fig()
-        else:
-            axs = ax12
-        if color == "Pint":
-            Pintar = np.array([Pintdict[k] for k in KIDlist])
-            cmap, norm = _get_cmap(Pintar=Pintar)
-        elif color == "V":
-            Vdict = io.get_Vdict(Chipnum)
-            cmap, norm = _get_cmap(Vdict=Vdict)
-        elif color == "Pread":
-            Preaddict = io.get_Preaddict(Chipnum)
-            Preadar = np.array([Preaddict[k] for k in KIDlist])
-            cmap, norm = _get_cmap(Preadar=Preadar)
-        elif color == "KIDnum":
-            cmap, norm = _get_cmap(KIDlist=KIDlist)
-
-    for KIDnum in KIDlist:
-        Preadar = _selectPread(pltPread, io.get_grPread(TDparam, KIDnum))
-        if pltKIDsep:
-            if ax12 is None:
-                fig, axs = _make_fig()
-            else:
-                axs = ax12
-
-            if len(KIDlist) > 1:
-                fig.suptitle(f"KID{KIDnum}")
-
-            if color == "Pread":
-                cmap, norm = _get_cmap(Preadar=Preadar)
-            elif color == "Pint":
-                cmap, norm = _get_cmap(Pintar=np.array(Pintdict[KIDnum]))
-
-        if lvlcomp != "" or pltkaplan or pltthmlvl or pltthlvl or pltTTc:
-            if SCvol is None:
-                SCvol = SuperCond.init_SCvol(Chipnum, KIDnum, **SCkwargs)
-        else:
-            SCvol = SuperCond.Vol(SuperCond.Al, np.nan, np.nan)
-
-        for Pread in Preadar:
-            Temp = np.trim_zeros(io.get_grTemp(TDparam, KIDnum, Pread))
-            lvlcompspl = calc.NLcomp(
-                Chipnum, KIDnum, Pread, SCvol=SCvol, method=lvlcomp, var=spec
-            )
-
-            if suboffres:
-                Temp = np.intersect1d(Temp, io.get_grTemp(TDparamoffres, KIDnum, Pread))
-
-            if Tminmax is not None:
-                if Tminmax[0] is not None:
-                    Temp = Temp[Temp > Tminmax[0]]
-                if Tminmax[1] is not None:
-                    Temp = Temp[Temp < Tminmax[1]]
-            taut = np.zeros((len(Temp)))
-            tauterr = np.zeros((len(Temp)))
-            lvl = np.zeros((len(Temp)))
-            lvlerr = np.zeros((len(Temp)))
-            for i in range(len(Temp)):
-                freq, SPR = io.get_grdata(TDparam, KIDnum, Pread, Temp[i], spec)
-                if suboffres:
-                    orfreq, orSPR = io.get_grdata(
-                        TDparamoffres, KIDnum, Pread, Temp[i], spec
-                    )
-                    freq, SPR = noise.filters.subtr_spec(freq, SPR, orfreq, orSPR)
-                if delampNoise:
-                    freq, SPR = noise.filters.del_ampNoise(freq, SPR)
-                if del1fNoise:
-                    freq, SPR = noise.filters.del_1fNoise(freq, SPR)
-                if del1fnNoise:
-                    freq, SPR = noise.filters.del_1fnNoise(freq, SPR)
-
-                if showfit:
-                    print(
-                        "{}, KID{}, -{} dBm, T={}, {}".format(
-                            Chipnum, KIDnum, Pread, Temp[i], spec
-                        )
-                    )
-                taut[i], tauterr[i], lvl[i], lvlerr[i] = noise.fit.Lorentzian(
-                    freq,
-                    SPR,
-                    plot=showfit,
-                    startf=startstopf[0],
-                    stopf=startstopf[1],
-                )
-                if showfit:
-                    print(tauterr[i] / taut[i])
-
-                lvl[i] = lvl[i] / interpolate.splev(
-                    Temp[i] * 1e-3, lvlcompspl)
-                lvlerr[i] = lvlerr[i] / interpolate.splev(
-                    Temp[i] * 1e-3, lvlcompspl)
-
-            # Deleting bad fits and plotting:
-            mask = ~np.isnan(taut)
-            mask[mask] = tauterr[mask] / taut[mask] <= relerrthrs
-
-            if color == "Pread":
-                clr = cmap(norm(-1 * Pread))
-            elif color == "Pint":
-                clr = cmap(norm(np.array(Pintdict[KIDnum])[Preadar==Pread]))
-            elif color == "V":
-                clr = cmap(norm(Vdict[KIDnum]))
-            elif color == "KIDnum":
-                clr = cmap(norm(KIDnum))
-            else:
-                clr = color
-
-            if pltTTc:
-                Temp = Temp / (SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6) * 1e3)
-
-            axs[0].errorbar(
-                Temp[mask],
-                taut[mask],
-                yerr=tauterr[mask],
-                fmt=fmt,
-                capsize=3.0,
-                color=clr,
-                mec="k",
-                label=label if Pread == Preadar[-1] else "",
-            )
-            axs[1].errorbar(
-                Temp[mask],
-                10 * np.log10(lvl[mask]),
-                yerr=10 * np.log10((lvlerr[mask] + lvl[mask]) / lvl[mask]),
-                fmt=fmt,
-                capsize=3.0,
-                color=clr,
-                mec="k",
-                label=label if Pread == Preadar[-1] else "",
-            )
-            if pltthlvl:
-                if Tminmax is not None and not pltTTc:
-                    Tstartstop = Tminmax
-                else:
-                    Tstartstop = (Temp[mask].min(), Temp[mask].max())
-                Ttemp = np.linspace(*Tstartstop, 100)
-                if pltTTc:
-                    Ttemp = Ttemp * (
-                        SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6) * 1e3
-                    )
-                explvl = (
-                    interpolate.splev(
-                        Ttemp * 1e-3, calc.Respspl(Chipnum, KIDnum, Pread, var=spec)
-                    )
-                    ** 2
-                )
-                explvl *= (
-                    4
-                    * SCvol.SC.t0
-                    * 1e-6
-                    * SCvol.V
-                    * SCvol.SC.N0
-                    * (SCvol.SC.kbTc) ** 3
-                    / (2 * (SCvol.SC.D0) ** 2)
-                    * (1 + SCvol.tesc / SCvol.SC.tpb)
-                    / 2
-                )
-                explvl /= interpolate.splev(Ttemp * 1e-3, lvlcompspl)
-                if pltTTc:
-                    Ttemp = Ttemp / (
-                        SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6) * 1e3
-                    )
-                (thlvlplot,) = axs[1].plot(
-                    Ttemp,
-                    10 * np.log10(explvl),
-                    color=clr,
-                    linestyle="--",
-                    linewidth=2.0,
-                )
-                axs[1].legend((thlvlplot,), (r"Expected noise level",))
-
-            if pltkaplan and Temp[mask].size != 0:
-                if Tminmax is not None and not pltTTc:
-                    Tstartstop = Tminmax
-                else:
-                    Tstartstop = (Temp[mask].min(), Temp[mask].max())
-                T = np.linspace(*Tstartstop, 100)
-
-                if pltTTc:
-                    T = T * (SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6))
-                else:
-                    T = T * 1e-3
-                taukaplan = SCth.tau.qpstar(T, SCvol)
-                if pltTTc:
-                    T = T / (SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6))
-                else:
-                    T = T * 1e3
-
-                axs[0].plot(
-                    T,
-                    taukaplan,
-                    color=clr,
-                    linestyle="--",
-                    linewidth=2.0,
-                    label="Kaplan, $\\tau_{qp}^*$",
-                )
-
-            if plttscat:
-                if Tminmax is not None:
-                    Tstartstop = Tminmax
-                else:
-                    Tstartstop = (Temp[mask].min(), Temp[mask].max())
-                T = np.linspace(*Tstartstop, 100)
-
-                if pltTTc:
-                    T = T * (SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6))
-                else:
-                    T = T * 1e-3
-                tscat = SCvol.SC.t0 / (
-                    2.277
-                    * (SCvol.SC.kbTc / (2 * SCvol.SC.D0)) ** 0.5
-                    * (T / (SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6)))
-                    ** (7 / 2)
-                )
-                if pltTTc:
-                    T = T / (SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6))
-                else:
-                    T = T * 1e3
-                axs[0].plot(
-                    T,
-                    tscat,
-                    color=clr,
-                    linestyle="-.",
-                    linewidth=2.0,
-                    label="Kaplan, $\\tau_s$",
-                )
-
-            if pltthmlvl:
-                try:
-                    if pltTTc:
-                        Temp = Temp * (
-                            SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6) * 1e3
-                        )
-                    tauspl = interpolate.splrep(Temp[mask], taut[mask], s=0)
-                    T = np.linspace(Temp[mask].min(), Temp[mask].max(), 100)
-                    Nqp = np.zeros(len(T))
-                    for i in range(len(T)):
-                        Nqp[i] = SCvol.V * SCth.nqp(
-                            T[i] * 1e-3 * const.Boltzmann / const.e * 1e6,
-                            SCvol.D0,
-                            SCvol.SC,
-                        )
-                    thmfnl = (
-                        4
-                        * interpolate.splev(T, tauspl)
-                        * 1e-6
-                        * Nqp
-                        * interpolate.splev(
-                            T * 1e-3, calc.Respspl(Chipnum, KIDnum, Pread, var=spec)
-                        )
-                        ** 2
-                    )
-                    thmfnl /= interpolate.splev(T * 1e-3, lvlcompspl)
-                    if pltTTc:
-                        T = T / (SCvol.SC.kbTc / (const.Boltzmann / const.e * 1e6) * 1e3)
-                    (thmfnlplot,) = axs[1].plot(
-                        T,
-                        10 * np.log10(thmfnl),
-                        color=clr,
-                        linestyle="--",
-                        linewidth=3.0,
-                    )
-                    axs[1].legend(
-                        (thmfnlplot,),
-                        ("Thermal Noise Level \n with measured $\\tau_{qp}^*$",),
-                    )
-                except:
-                    warnings.warn(
-                        "Could not make Thermal Noise Level, {},KID{},-{} dBm,{}".format(
-                            Chipnum, KIDnum, Pread, spec
-                        )
-                    )
-            if plttres:
-                S21data = io.get_S21data(Chipnum, KIDnum, Pread)
-                (tresline,) = axs[0].plot(
-                    S21data[:, 1] / S21data[0, 21] if pltTTc else S21data[:, 1] * 1e3,
-                    S21data[:, 2] / (np.pi * S21data[:, 5]) * 1e6,
-                    color=clr,
-                    linestyle=":",
-                )
-                axs[0].legend((tresline,), ("$\\tau_{res}$",))
-        axs[0].set_yscale("log")
-        for i in range(2):
-            if pltTTc:
-                axs[i].set_xlabel("$T/T_c$")
-            else:
-                axs[i].set_xlabel("Temperature (mK)")
-        axs[0].set_ylabel(r"$\tau_{qp}^*$ (µs)")
-
-        if lvlcomp == "Resp":
-            axs[1].set_ylabel(r"Noise Level/$\mathcal{R}^2(T)$ (dB/Hz)")
-        elif lvlcomp == "RespV":
-            axs[1].set_ylabel(r"Noise Level/$(\mathcal{R}^2(T)V)$ (dB/Hz)")
-        elif lvlcomp == "RespVtescTc":
-            axs[1].set_ylabel(r"Noise Level/$(\mathcal{R}^2(T)\chi)$ (dB/Hz)")
-        elif lvlcomp == "":
-            axs[1].set_ylabel(r"Noise Level (dB/Hz)")
-        elif lvlcomp == "RespLowT":
-            axs[1].set_ylabel(r"Noise Level/$\mathcal{R}^2(T=50 mK)$ (dB/Hz)")
-        else:
-            axs[1].set_ylabel(r"comp. Noise Level (dB/Hz)")
-        plt.tight_layout()
-        if savefig:
-            plt.savefig("GR_{}_KID{}_{}.pdf".format(Chipnum, KIDnum, spec))
-            plt.close()
-    if ax12 is None:
-        return fig, axs
-
-
 def Nqp(
-    Chipnum,
-    KIDnum,
+    chip,
+    KIDs=None,
     pltPread="all",
-    spec="cross",
-    startstopf=(None, None),
-    delampNoise=False,
-    del1fNoise=False,
-    del1fnNoise=False,
+    spec=["cross"],
     Tminmax=None,
     relerrthrs=0.3,
     pltThrm=True,
-    pltNqpQi=False,
-    splitT=0,
-    pltNqptau=False,
-    SCvol=None,
-    SCkwargs={},
+    SC=None,
     nqpaxis=True,
-    fig=None,
-    ax=None,
-    label=None,
-    pltcolor=None,
-    fmt="-o",
+    inclpulse=False,
 ):
     """Plots the number of quasiparticle calculated from the noise levels and lifetimes from PSDs.
     options similar to options in ltnlvl.
     
     pltThrm -- also plot thermal line (needs constants)
-    pltNqpQi -- plot Nqp from Qi as well (needs constants)
-    splitT -- makes NqpQi line dashed below this T
-    pltNqptau -- plot Nqp from lifetime only (need constants)
     nqpaxis -- also shows density on right axis."""
-
-    TDparam = io.get_grTDparam(Chipnum)
-    if ax is None:
+    
+    specdict = {'amp': [0, '-^'], 'phase': [1, '-v'], 'cross': [2, '-o']}
+    KIDPrT = io.get_noiseKIDPrT(chip)
+    if KIDs is None:
+        KIDs = np.unique(KIDPrT[:, 0])
+        
+    for KID in KIDs:
         fig, ax = plt.subplots()
+        fig.suptitle(f'{chip}, KID{KID}')
+        Preads = np.unique(KIDPrT[KIDPrT[:, 0] == KID, 1])
+        Preadar = selectPread(pltPread, Preads)
 
-    Preadar = _selectPread(pltPread, io.get_grPread(TDparam, KIDnum))
-
-    if Preadar.size > 1:
         cmap = matplotlib.cm.get_cmap("plasma")
         norm = matplotlib.colors.Normalize(-1.05 * Preadar.max(), -.95*Preadar.min())
         clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax)
         clb.ax.set_title(r"$P_{read}$ (dBm)")
-    if SCvol is None:
-        SCvol = SuperCond.init_SCvol(Chipnum, KIDnum, set_tesc=pltNqptau, **SCkwargs)
 
-    for Pread in Preadar:
-        S21data = io.get_S21data(Chipnum, KIDnum, Pread)
-
-        Respspl = calc.Respspl(Chipnum, KIDnum, Pread, var=spec)
-
-        Temp = io.get_grTemp(TDparam, KIDnum, Pread)
-        if Tminmax is not None:
-            if Tminmax[0] is not None:
-                Temp = Temp[Temp > Tminmax[0]]
-            if Tminmax[1] is not None:
-                Temp = Temp[Temp < Tminmax[1]]
-        Nqp, Nqperr, taut = np.zeros((3, len(Temp)))
-        for i in range(len(Temp)):
-            freq, SPR = io.get_grdata(TDparam, KIDnum, Pread, Temp[i], spec=spec)
-            if delampNoise:
-                freq, SPR = noise.filters.del_ampNoise(freq, SPR)
-            if del1fNoise:
-                freq, SPR = noise.filters.del_1fNoise(freq, SPR)
-            if del1fnNoise:
-                freq, SPR = noise.filters.del_1fnNoise(freq, SPR)
-            taut[i], tauterr, lvl, lvlerr = noise.fit.Lorentzian(
-                freq, SPR, startf=startstopf[0], stopf=startstopf[1]
-            )
-            lvl = lvl / interpolate.splev(Temp[i] * 1e-3, Respspl) ** 2
-            lvlerr = lvlerr / interpolate.splev(Temp[i] * 1e-3, Respspl) ** 2
-            Nqp[i] = lvl / (4 * taut[i] * 1e-6)
-            Nqperr[i] = np.sqrt(
-                (lvlerr / (4 * taut[i] * 1e-6)) ** 2
-                + (-lvl * tauterr * 1e-6 / (4 * (taut[i] * 1e-6) ** 2)) ** 2
-            )
-        mask = ~np.isnan(Nqp)
-        mask[mask] = Nqperr[mask] / Nqp[mask] <= relerrthrs
-        if pltcolor is None:
-            if Preadar.size > 1:
-                color = cmap(norm(-1 * Pread))
-            elif pltPread == "min":
-                color = "purple"
-            elif pltPread == "max":
-                color = "gold"
-        else:
-            color=pltcolor
-
-        dataline = ax.errorbar(
-            Temp[mask],
-            Nqp[mask],
-            yerr=Nqperr[mask],
-            color=color,
-            fmt=fmt,
-            mec="k",
-            capsize=2.0,
-            label=label,
-        )
-        if pltNqptau:
-            Nqp_ = SCvol.V * SCth.nqpfromtau(taut, SCvol)
-            (tauline,) = ax.plot(
-                Temp[mask],
-                Nqp_[mask],
-                color=color,
-                zorder=len(ax.lines) + 1,
-                label="$\\tau_{qp}^*$",
-            )
-    if pltNqpQi:
-        Preadar = io.get_S21Pread(Chipnum, KIDnum)
         for Pread in Preadar:
-            S21data = io.get_S21data(Chipnum, KIDnum, Pread)
-            T, Nqp = calc.NqpfromQi(S21data, SC=SCvol.SC)
-            mask = np.logical_and(
-                T * 1e3 > ax.get_xlim()[0], T * 1e3 < ax.get_xlim()[1]
-            )
-            totalT = T[mask]
-            totalNqp = Nqp[mask]
-            if len(Preadar) == 1:
-                color = "g"
+            fits = io.get_noisefits(chip, KID, Pread)
+
+            if Tminmax is not None:
+                Tmask = (fits[:, 0] > Tminmax[0]) & (fits[:, 0] < Tminmax[1])
             else:
-                color = cmap(norm(closestPread))
-            (Qline,) = ax.plot(
-                totalT[totalT > splitT] * 1e3,
-                totalNqp[totalT > splitT],
-                linestyle="-",
-                color=color,
-                zorder=len(ax.lines) + 1,
-                label="$Q_i$",
-            )
+                Tmask = np.ones(len(fits[:, 0]), dtype='bool')
+            
+            for sp in spec:
+                tau, tauerr, lvl, lvlerr = fits[:, (specdict[sp][0] * 4 + 1):(specdict[sp][0] * 4 + 5)].T
+                Respspl = calc.Respspl(chip, KID, Pread, var=sp)
+                Nqp = lvl / (4 * tau * 1e-6) / interpolate.splev(fits[:, 0] * 1e-3, Respspl)**2
+                Nqperr = np.sqrt((Nqp / lvl * lvlerr)**2 + (Nqp / tau * tauerr)**2)
+                
+                mask = Tmask & (tauerr/tau < relerrthrs)
+                ax.errorbar(fits[mask, 0], Nqp[mask], yerr=Nqperr[mask], 
+                            color=cmap(norm(-Pread)), fmt=specdict[sp][1],
+                           capsize=2, mec='k')
+            if inclpulse:
+                try:
+                    pfits = io.get_pulsefits(chip, KID, Pread, inclpulse)
+                    phresp = interpolate.splev(pfits[:, 0]*1e-3, calc.Respspl(chip, KID, Pread, var='phase'))
+                    Nqp = pfits[:, 9] / phresp
+                    Nqperr = pfits[:, 10] / phresp
+                    mask = Nqperr/Nqp < relerrthrs
+                    ax.errorbar(pfits[mask,  0], Nqp[mask], yerr=Nqperr[mask],
+                                color=cmap(norm(-Pread)), fmt='-s',
+                                   capsize=2, mec='k')
+                except:
+                    pass
+                            
+                                           
+
+        if pltThrm:
+            if SC is None:
+                SC = SuperCond.Al
+            SCvol = SuperCond.init_SCvol(chip, KID, SC, set_tesc=False)
+            T = np.linspace(*ax.get_xlim(), 100)
+            NqpT = np.zeros(100)
+            for i in range(len(T)):
+                D_ = SCth.D(const.Boltzmann / const.e * 1e6 * T[i] * 1e-3, SCvol.SC)
+                NqpT[i] = SCvol.V * SCth.nqp(
+                    const.Boltzmann / const.e * 1e6 * T[i] * 1e-3, D_, SCvol.SC
+                )
             ax.plot(
-                totalT[totalT < splitT] * 1e3,
-                totalNqp[totalT < splitT],
-                linestyle="--",
-                color=color,
-                zorder=len(ax.lines) + 1,
+                T, NqpT, color='k', 
+                zorder=len(ax.lines) + 1, label="Thermal $N_{qp}$"
             )
-    if pltThrm:
-        T = np.linspace(*ax.get_xlim(), 100)
-        NqpT = np.zeros(100)
-        for i in range(len(T)):
-            D_ = SCth.D(const.Boltzmann / const.e * 1e6 * T[i] * 1e-3, SCvol.SC)
-            NqpT[i] = SCvol.V * SCth.nqp(
-                const.Boltzmann / const.e * 1e6 * T[i] * 1e-3, D_, SCvol.SC
-            )
-        (Thline,) = ax.plot(
-            T, NqpT, color='k' if color is None else color, 
-            zorder=len(ax.lines) + 1, label="Thermal $N_{qp}$"
-        )
+            ax.legend()
 
-    handles, labels = ax.get_legend_handles_labels()
-    by_label = dict(zip(labels, handles))
-    ax.legend(by_label.values(), by_label.keys())
+        ax.set_ylabel("$N_{qp}$")
+        ax.set_xlabel("Temperature (mK)")
+        ax.set_yscale("log")
+        if ax.get_ylim()[0] < 1e-1:
+            ax.set_ylim(1e-1, None)
 
-    ax.set_ylabel("$N_{qp}$")
-    ax.set_xlabel("Temperature (mK)")
+        if nqpaxis:
 
-    ax.set_yscale("log")
+            def nqptoNqp(x):
+                return x * SCvol.V
 
-    if nqpaxis:
+            def Nqptonqp(x):
+                return x / SCvol.V
 
-        def nqptoNqp(x):
-            return x * SCvol.V
+            ax2 = ax.secondary_yaxis("right", functions=(Nqptonqp, nqptoNqp))
+            ax2.set_ylabel("$n_{qp}$ ($\\mu m^{-3}$)")
+            l, b, w, h = clb.ax.get_position().bounds
+            clb.ax.set_position([l + 0.12, b, w, h])
 
-        def Nqptonqp(x):
-            return x / SCvol.V
-
-        ax2 = ax.secondary_yaxis("right", functions=(Nqptonqp, nqptoNqp))
-        ax2.set_ylabel("$n_{qp}$ ($\\mu m^{-3}$)")
-    if Preadar.size > 1:
-        l, b, w, h = clb.ax.get_position().bounds
-        clb.ax.set_position([l + 0.12, b, w, h])
 
 
 def Qif0(
@@ -797,7 +175,7 @@ def Qif0(
     else:
         axs = ax12
 
-    Preadar = _selectPread(pltPread, io.get_S21Pread(Chipnum, KIDnum))
+    Preadar = selectPread(pltPread, io.get_S21Pread(Chipnum, KIDnum))
     if color == "Pread":
         cmap = matplotlib.cm.get_cmap("plasma")
         norm = matplotlib.colors.Normalize(-1.05 * Preadar.max(), -0.95 * Preadar.min())

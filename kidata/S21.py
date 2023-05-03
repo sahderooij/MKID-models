@@ -39,9 +39,11 @@ class S21circle(object):
     
     def fit_circle(self, plot=False):
         '''
-        Fits a circle to the complex S21data data using an algebraic fit technique. Returns the center point and the radius. 
+        Fits a circle to the complex S21data data using 
+        an algebraic fit technique. Returns the center point and the radius. 
 
-        For an explanation of the method see the paper  "Efficient and robust analysis of complex scattering data under noise in
+        For an explanation of the method see the paper  
+        "Efficient and robust analysis of complex scattering data under noise in
         resonators", Probst et al., 2014, doi.org/10.1063/1.4907935.
         Adjusted from a script by Bruno Buijtendorp
         '''
@@ -67,7 +69,8 @@ class S21circle(object):
         A = np.real(eivec[:, np.where(eival > 0, eival, np.inf).argmin()])
         xc = -A[1]/(2*A[0])
         yc = -A[2]/(2*A[0])
-        r0 = 1/(2*np.abs(A[0]))*np.sqrt(A[1]**2 + A[2]**2 - 4*A[0]*A[3]) #this sqrt is needed to compensate numerical errors
+        r0 = 1/(2*np.abs(A[0]))*np.sqrt(A[1]**2 + A[2]**2 - 4*A[0]*A[3]) 
+        # this sqrt is needed to compensate numerical errors
         if plot:
             fig, ax = plt.subplots(figsize=(5, 5))
             ax.scatter(x, y)
@@ -99,38 +102,33 @@ class kidsweep(object):
         self.S21circ = S21circle(S21data)
     
     
-    def truncate_data(self, fmin=None, fmax=None, plot=False):
-        approxf0 = self.f[self.S21circ.dB.argmin()]
-        if fmin is None:
+    def truncate_data(self, fminmax=(None, None), plot=False):
+        if (fminmax[0] is None) and (fminmax[1] is None):
             #select -1 dB point
-            rlmask = self.f < approxf0
-            S21abs = np.abs(self.S21circ.S21[rlmask])
-            S21min = S21abs.min()
-            S21max = S21abs.max()
-            fmin = self.f[rlmask][
-                np.abs(S21abs - (S21max - S21min)/2**(1/3)).argmin()]
-        if fmax is None:
-            #select -1 dB points
-            rlmask = self.f > approxf0
-            S21abs = np.abs(self.S21circ.S21[rlmask])
-            S21min = S21abs.min()
-            S21max = S21abs.max()
-            fmax = self.f[rlmask][
-                np.abs(S21abs - (S21max - S21min)/2**(1/3)).argmin()]
+            approxf0 = self.f[self.S21circ.dB.argmin()]
+            fminmax = np.array(fminmax)
+            for i, rlmask in enumerate([self.f < approxf0,
+                                       self.f > approxf0]):
+                S21abs = np.abs(self.S21circ.S21[rlmask])
+                S21max = S21abs.max()
+                fminmax[i] = self.f[rlmask][
+                    np.abs(S21abs - S21max*10**(-1/20)).argmin()]
             
-        mask = (self.f > fmin) & (self.f < fmax)
+        mask = (self.f > fminmax[0]) & (self.f < fminmax[1])
         if plot:
             plt.figure()
+            if 'approxf0' in locals():
+                plt.plot(approxf0, self.S21circ.dB.min(), 
+                         'rx', label='approx f0')
             plt.plot(self.f, self.S21circ.dB, label='data')
             plt.plot(self.f[mask], self.S21circ.dB[mask], label='trunc. data')
             plt.legend()
             
         self.S21circ.S21 = self.S21circ.S21[mask]
-        self.f = self.f[mask]       
-
+        self.f = self.f[mask]   
+        self.S21circ.fit_circle()
 
     def fit_delay(self):
-
         def minfunc(tau, freq, S21circ):
             _S21 = copy.deepcopy(S21circ)
             _S21.S21 *= np.exp(1j*2*np.pi*tau*freq)
@@ -240,8 +238,6 @@ class kidsweep(object):
     def plot_origin(self, ax):
         ax.axhline(0, color='k', linestyle='--')
         ax.axvline(0, color='k', linestyle='--')
-            
-    
         
 
 def getKIDfreqs(freq, S21data, prom=2, 
@@ -319,7 +315,7 @@ def S21fit(freq, cmplS21data, approxf0=None, wnd=None, plot=False):
 
 
     # aguess = (np.abs(data[0]) + np.abs(data[-1])) / 2
-    #guess Ql as f0/df(FWHM)
+    # guess Ql as f0/df(FWHM)
     f0guess, Qlguess, Qc_realguess = guessfrQlQc(f, data)
 
     phase = np.unwrap(np.angle(data))
