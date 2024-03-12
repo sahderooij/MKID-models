@@ -62,17 +62,19 @@ def del_1fNoise(freq, SPR, plot=False):
     return freqn, SPRn
 
 
-def del_1fnNoise(freq, SPR, minn=0.35, plot=False):
-    """A 1/f^n spectrum is fitted and subtracted if n is higher than minn (default: 0.35)."""
+def del_1fnNoise(freq, SPR, startind=10, stopf=1e2, minn=0.45, plot=False):
+    """A 1/f^n spectrum is fitted and subtracted if n is higher than minn (default: 0.45).
+    startind gives how many first values are disregarded, stopf gives to which frequency is fitted."""
     # Make it non-dB
     SPRn = 10 ** (SPR / 10)
+    stopind = np.abs(freq[~np.isnan(SPRn)]-stopf).argmin()
 
     try:
         fit = curve_fit(
-            lambda f, a, b: a * f ** (-b),
-            freq[~np.isnan(SPRn)][4:],
-            SPRn[~np.isnan(SPRn)][4:],
-            p0=(SPRn[~np.isnan(SPRn)][1:6].mean(), 1),
+            lambda f, a, n: a * f ** (-n),
+            freq[~np.isnan(SPRn)][startind:stopind],
+            SPRn[~np.isnan(SPRn)][startind:stopind],
+            p0=(SPRn[~np.isnan(SPRn)][startind:startind+10].mean(), 1),
         )
         if fit[0][1] > minn:
             SPRn -= fit[0][0] * freq ** (-fit[0][1])
@@ -105,7 +107,13 @@ def del_otherNoise(freq, SPR, plot=False, del1fn=False):
         return del_1fNoise(*del_ampNoise(freq, SPR, plot=plot), plot=plot)
 
 def del_50Hz(freq, SPR):
-    mask = ((freq < 45) | (freq > 55)) & ((freq < 140) | (freq > 160))
+    mask = (
+        ((freq < 45) | (freq > 55)) 
+        & ((freq < 140) | (freq > 160)) 
+        & ((freq < 670) | (freq > 920))
+        & ((freq < 200) | (freq > 400))
+        & ((freq < 1e3) | (freq > 2e3))
+    )
     return freq[mask], SPR[mask]
 
 def subtr_spec(freq, SPR, mfreq, mSPR, plot=False):

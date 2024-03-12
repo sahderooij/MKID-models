@@ -32,106 +32,111 @@ def n(E, kbT):
             return np.exp(-E / kbT)
 
 
-def cinduct(hw, D, kbT):
+def cinduct(hw, D_, kbT):
     """Mattis-Bardeen equations."""
 
-    def integrand11(E, hw, D, kbT):
-        nume = 2 * (f(E, kbT) - f(E + hw, kbT)) * np.abs(E ** 2 + D ** 2 + hw * E)
-        deno = hw * ((E ** 2 - D ** 2) * ((E + hw) ** 2 - D ** 2)) ** 0.5
+    def integrand11(E, hw, D_, kbT):
+        nume = 2 * (f(E, kbT) - f(E + hw, kbT)) * np.abs(E ** 2 + D_ ** 2 + hw * E)
+        deno = hw * ((E ** 2 - D_ ** 2) * ((E + hw) ** 2 - D_ ** 2)) ** 0.5
         return nume / deno
 
-    def integrand12(E, hw, D, kbT):
-        nume = (1 - 2 * f(E + hw, kbT)) * np.abs(E ** 2 + D ** 2 + hw * E)
-        deno = hw * ((E ** 2 - D ** 2) * ((E + hw) ** 2 - D ** 2)) ** 0.5
+    def integrand12(E, hw, D_, kbT):
+        nume = (1 - 2 * f(E + hw, kbT)) * np.abs(E ** 2 + D_ ** 2 + hw * E)
+        deno = hw * ((E ** 2 - D_ ** 2) * ((E + hw) ** 2 - D_ ** 2)) ** 0.5
         return nume / deno
 
-    def integrand2(E, hw, D, kbT):
-        nume = (1 - 2 * f(E + hw, kbT)) * np.abs(E ** 2 + D ** 2 + hw * E)
-        deno = hw * ((D ** 2 - E ** 2) * ((E + hw) ** 2 - D ** 2)) ** 0.5
+    def integrand2(E, hw, D_, kbT):
+        nume = (1 - 2 * f(E + hw, kbT)) * np.abs(E ** 2 + D_ ** 2 + hw * E)
+        deno = hw * ((D_ ** 2 - E ** 2) * ((E + hw) ** 2 - D_ ** 2)) ** 0.5
         return nume / deno
 
-    s1 = integrate.quad(integrand11, D, np.inf, args=(hw, D, kbT))[0]
-    if hw > 2 * D:
-        s1 += integrate.quad(integrand12, D - hw, -D, args=(hw, D, kbT))[0]
-    s2 = integrate.quad(integrand2, np.max([D - hw, -D]), D, args=(hw, D, kbT))[0]
+    s1 = integrate.quad(integrand11, D_, np.inf, args=(hw, D_, kbT))[0]
+    if hw > 2 * D_:
+        s1 += integrate.quad(integrand12, D_ - hw, -D_, args=(hw, D_, kbT))[0]
+    s2 = integrate.quad(integrand2, np.max([D_ - hw, -D_]), D_, args=(hw, D_, kbT))[0]
     return s1, s2
 
 
-def D(kbT, SC):
+def D(kbT, SC, useD0lowT=False):
     """Calculates the thermal average energy gap, Delta. Tries to load Ddata,
-    but calculates from scratch otherwise. Then, it cannot handle arrays.  """
+    but calculates from scratch otherwise. If Ddata is loaded, it can handle arrays.  """
     Ddata = SC.Ddata
     if Ddata is not None:
         Dspl = interpolate.splrep(Ddata[0, :], Ddata[1, :], s=0)
         return np.clip(interpolate.splev(kbT, Dspl), 0, None)
     else:
-        warnings.warn(
-            "D calculation takes long.. \n Superconductor={}\n N0={}\n kbTD={}\n Tc={}".format(
-                SC.name, SC.N0, SC.kbTD, SC.kbTc / (const.Boltzmann / const.e * 1e6)
+        if useD0lowT and kbT<SC.kbTc/2:
+            return SC.D0
+        else:
+            warnings.warn(
+                "D calculation takes long.. \n Superconductor={}\n N0={}\n kbTD={}\n Tc={}".format(
+                    SC.name, SC.N0, SC.kbTD, SC.kbTc / (const.Boltzmann / const.e * 1e6)
+                )
             )
-        )
+    
+            def integrandD(E, D, kbT, SC):
+                return SC.N0 * SC.Vsc * (1 - 2 * f(E, kbT)) / np.sqrt(E ** 2 - D ** 2)
+    
+            def dint(D, kbT, SC):
+                return np.abs(
+                    integrate.quad(integrandD, D, SC.kbTD, args=(D, kbT, SC), points=(D,))[
+                        0
+                    ]
+                    - 1
+                )
+    
+            res = minisc(dint, args=(kbT, SC), method="bounded", bounds=(0, SC.D0))
+            if res.success:
+                return np.clip(res.x, 0, None)
 
-        def integrandD(E, D, kbT, SC):
-            return SC.N0 * SC.Vsc * (1 - 2 * f(E, kbT)) / np.sqrt(E ** 2 - D ** 2)
 
-        def dint(D, kbT, SC):
-            return np.abs(
-                integrate.quad(integrandD, D, SC.kbTD, args=(D, kbT, SC), points=(D,))[
-                    0
-                ]
-                - 1
-            )
-
-        res = minisc(dint, args=(kbT, SC), method="bounded", bounds=(0, SC.D0))
-        if res.success:
-            return np.clip(res.x, 0, None)
-
-
-def nqp(kbT, D, SC):
-    """Thermal average quasiparticle denisty. It can handle arrays 
-    and uses a low temperature approximation, if kbT < Delta/100."""
-    if np.array(kbT < D / 100).all():
-        return 2 * SC.N0 * np.sqrt(2 * np.pi * kbT * D) * np.exp(-D / kbT)
+def nqp(kbT, D_, SC):
+    """Thermal average quasiparticle denisty. It can handle arrays (only if
+    both kbT and D_ are arrays) and uses a low temperature approximation, 
+    if kbT < Delta/100."""
+    
+    if np.array(kbT < D_ / 100).all():
+        return 2 * SC.N0 * np.sqrt(2 * np.pi * kbT * D_) * np.exp(-D_ / kbT)
     else:
 
-        def integrand(E, kbT, D, SC):
-            return 4 * SC.N0 * E / np.sqrt(E ** 2 - D ** 2) * f(E, kbT)
+        def integrand(E, kbT, D_, SC):
+            return 4 * SC.N0 * E / np.sqrt(E ** 2 - D_ ** 2) * f(E, kbT)
 
         if any(
             [
                 type(kbT) is float,
-                type(D) is float,
+                type(D_) is float,
                 type(kbT) is np.float64,
-                type(D) is np.float64,
+                type(D_) is np.float64,
             ]
-        ):  # make sure it can deal with kbT,D arrays
-            return integrate.quad(integrand, D, np.inf, args=(kbT, D, SC))[0]
+        ):  # make sure it can deal with kbT,D_ arrays
+            return integrate.quad(integrand, D_, np.inf, args=(kbT, D_, SC))[0]
         else:
-            assert kbT.size == D.size, "kbT and D arrays are not of the same size"
+            assert kbT.size == D_.size, "kbT and D_ arrays are not of the same size"
             result = np.zeros(len(kbT))
             for i in range(len(kbT)):
                 result[i] = integrate.quad(
-                    integrand, D[i], np.inf, args=(kbT[i], D[i], SC)
+                    integrand, D_[i], np.inf, args=(kbT[i], D_[i], SC)
                 )[0]
             return result
 
 
-def kbTeff(nqp, SC):
+def kbTeff(nqp_, SC):
     """Calculates the effective temperature (in µeV) at a certain 
    quasiparticle density."""
     Ddata = SC.Ddata
     if Ddata is not None:
         kbTspl = interpolate.splrep(Ddata[2, :], Ddata[0, :],
                                    s=0, k=1)
-        return interpolate.splev(nqp, kbTspl)
+        return interpolate.splev(nqp_, kbTspl)
     else:
-        def minfunc(kbT, nqp, SC):
+        def minfunc(kbT, nqp_, SC):
             Dt = D(kbT, SC)
-            return np.abs(nqp(kbT, Dt, SC) - nqp)
+            return np.abs(nqp(kbT, Dt, SC) - nqp_)
         res = minisc(
             minfunc,
             bounds=(0, 0.9 * SC.kbTc),
-            args=(nqp, SC),
+            args=(nqp_, SC),
             method="bounded",
             options={"xatol": 1e-15},
         )
@@ -151,28 +156,28 @@ def Zs(hw, kbT, SCsheet):
 
 
 
-def beta(kbT, D, SCsheet):
+def beta(kbT, D_, SCsheet):
     """calculates beta, a measure for how thin the film is
     compared to the penetration depth.
     D -- energy gap
     kbT -- temperature in µeV
     SC -- Superconductor object, from the SC class"""
     SC = SCsheet.SC
-    lbd = SC.lbd0 * 1 / np.sqrt(D / SC.D0 * np.tanh(D / (2 * kbT)))
+    lbd = SC.lbd0 * 1 / np.sqrt(D_ / SC.D0 * np.tanh(D_ / (2 * kbT)))
     return 1 + 2 * SCsheet.d / (lbd * np.sinh(2 * SCsheet.d / lbd))
 
 
-def Qi(s1, s2, ak, kbT, D, SCsheet):
+def Qi(s1, s2, ak, kbT, D_, SCsheet):
     """Calculates the internal quality factor, 
     from the complex conductivity. See PdV PhD thesis eq. (2.23)"""
-    b = beta(kbT, D, SCsheet)
+    b = beta(kbT, D_, SCsheet)
     return 2 * s2 / (ak * b * s1)
 
 
-def hwres(s2, hw0, s20, ak, kbT, D, SCsheet):
+def hwres(s2, hw0, s20, ak, kbT, D_, SCsheet):
     """Gives the resonance frequency in µeV, from the sigma2,
     from a linearization from point hw0,sigma20. See PdV PhD eq. (2.24)"""
-    b = beta(kbT, D, SCsheet)
+    b = beta(kbT, D_, SCsheet)
     return hw0 * (1 + ak * b / 4 / s20 * (s2 - s20))  # note that is linearized
 
 
@@ -187,22 +192,22 @@ def S21(Qi, Qc, hwread, dhw, hwres):
     return (Q / Qi + 2j * Q * dhw / hwres) / (1 + 2j * Q * dhw / hwres)
 
 
-def hwread(hw0, kbT0, ak, kbT, D, SCvol):
+def hwread(hw0, kbT0, ak, kbT, D_, SCvol):
     """Calculates at which frequency, one probes at resonance. 
     This must be done iteratively, as the resonance frequency is 
     dependent on the complex conductivity, which in turn depends on the
     read frequency."""
     # D_0 = D(kbT0, SC)
-    s20 = cinduct(hw0, D, kbT0)[1]
+    s20 = cinduct(hw0, D_, kbT0)[1]
 
-    def minfuc(hw, hw0, s20, ak, kbT, D, SCvol):
-        s1, s2 = cinduct(hw, D, kbT)
-        return np.abs(hwres(s2, hw0, s20, ak, kbT, D, SCvol) - hw)
+    def minfuc(hw, hw0, s20, ak, kbT, D_, SCvol):
+        s1, s2 = cinduct(hw, D_, kbT)
+        return np.abs(hwres(s2, hw0, s20, ak, kbT, D_, SCvol) - hw)
    
     res = minisc(
         minfuc,
         bracket=(0.5 * hw0, hw0, 2 * hw0),
-        args=(hw0, s20, ak, kbT, D, SCvol),
+        args=(hw0, s20, ak, kbT, D_, SCvol),
         method="brent",
         options={"xtol": 1e-21},
     )
@@ -210,7 +215,7 @@ def hwread(hw0, kbT0, ak, kbT, D, SCvol):
         return res.x
 
 
-def calc_Nwsg(kbT, D, e, V):
+def calc_Nwsg(kbT, D_, e, V):
     """Calculates the number of phonons with the Debye approximation, 
     for Al."""
 
@@ -228,7 +233,7 @@ def calc_Nwsg(kbT, D, e, V):
             )
         )
 
-    return integrate.quad(integrand, e + D, 2 * D, args=(kbT, V))[0]
+    return integrate.quad(integrand, e + D_, 2 * D_, args=(kbT, V))[0]
 
 
 

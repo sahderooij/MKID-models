@@ -20,7 +20,7 @@ from kidata import io
 def calc_pulseavg(
     filelocation, KIDPrT=None, save_location=None,
     pulse_len=2000, start=500, minmax_proms=None, 
-    coord='ampphase'
+    coord='ampphase', prctl=99.99, nstream=5
 ):
     """Script that runs a temp sweep of a certain data set and saves it.
     filelocation: the folder that contains .bin files.
@@ -31,7 +31,9 @@ def calc_pulseavg(
     minmax_prom: prominence spread of the desired peaks 
         (run selected_proms to determine these, asks if not given) 
     coord: choose coordinates in which the pulse is analysed: either 'ampphase' or 'RX' 
-        (the linear or non-linear, Smith, coordinates)."""
+        (the linear or non-linear, Smith, coordinates).
+    prctl: percentile of data points below first guess thershold for peak selection.
+    nstream: number of data files to be taken for thershold selection."""
 
     if KIDPrT is None:
         KIDPrT = np.unique(
@@ -58,7 +60,7 @@ def calc_pulseavg(
         
 
     if minmax_proms is None:
-        minmax_proms = select_proms(filelocation, KIDPrT, pulse_len, 5, coord)
+        minmax_proms = select_proms(filelocation, KIDPrT, pulse_len, min(n_streams, nstream), coord, prctl)
 
     KIDs = np.unique(KIDPrT[:, 0])
     for i in tnrange(len(KIDs), desc='KID', leave=False):
@@ -173,7 +175,7 @@ def calc_pulseavg(
                 )
 
 
-def select_proms(filelocation, KIDPrT=None, pulse_len=2e3, nstream=5, coord='ampphase'):
+def select_proms(filelocation, KIDPrT=None, pulse_len=2e3, nstream=5, coord='ampphase', prctl=99.99):
     # Shows you nstream timestreams and a hist of the peaks and
     # then asks you to select the wanted prominences
 
@@ -198,7 +200,7 @@ def select_proms(filelocation, KIDPrT=None, pulse_len=2e3, nstream=5, coord='amp
                     elif coord == 'RX':
                         amp, phase = to_RX(data)
                     peaks, peakheight = find_peaks(
-                        phase, prominence=np.percentile(phase, 99.99))
+                        phase, prominence=np.percentile(phase, prctl))
                     prominences = peakheight["prominences"]
                     total_prominences = np.append(
                         total_prominences, prominences, 0)

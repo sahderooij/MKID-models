@@ -78,26 +78,20 @@ def Nqp(
         Preadar = selectPread(pltPread, Preads)
 
         cmap = matplotlib.cm.get_cmap("plasma")
-        norm = matplotlib.colors.Normalize(-1.05 * Preadar.max(), -.95*Preadar.min())
+        norm = matplotlib.colors.Normalize(-1*Preadar.max(), -1*Preadar.min())
         clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax)
         clb.ax.set_title(r"$P_{read}$ (dBm)")
 
-        for Pread in Preadar:
-            fits = io.get_noisefits(chip, KID, Pread)
-
-            if Tminmax is not None:
-                Tmask = (fits[:, 0] > Tminmax[0]) & (fits[:, 0] < Tminmax[1])
-            else:
-                Tmask = np.ones(len(fits[:, 0]), dtype='bool')
-            
+        for Pread in Preadar:           
             for sp in spec:
-                tau, tauerr, lvl, lvlerr = fits[:, (specdict[sp][0] * 4 + 1):(specdict[sp][0] * 4 + 5)].T
-                Respspl = calc.Respspl(chip, KID, Pread, var=sp)
-                Nqp = lvl / (4 * tau * 1e-6) / interpolate.splev(fits[:, 0] * 1e-3, Respspl)**2
-                Nqperr = np.sqrt((Nqp / lvl * lvlerr)**2 + (Nqp / tau * tauerr)**2)
+                T, Nqp, Nqperr = calc.Nqp(chip, KID, Pread, spec=sp)
+                if Tminmax is not None:
+                    Tmask = (T > Tminmax[0]) & (T < Tminmax[1])
+                else:
+                    Tmask = np.ones(len(T), dtype='bool')
                 
-                mask = Tmask & (tauerr/tau < relerrthrs)
-                ax.errorbar(fits[mask, 0], Nqp[mask], yerr=Nqperr[mask], 
+                mask = Tmask & (Nqperr/Nqp < relerrthrs)
+                ax.errorbar(T[mask], Nqp[mask], yerr=Nqperr[mask], 
                             color=cmap(norm(-Pread)), fmt=specdict[sp][1],
                            capsize=2, mec='k')
             if inclpulse:
@@ -282,7 +276,7 @@ def Qfactorsandf0(Chipnum, KIDnum, Pread=None, fig=None, ax12=None):
 
 
 def Powers(Chipnum, KIDnum, Pread=None, ax=None):
-    """Plots the read power, internal power and absorbed power over temperature in one figure"""
+    """Plots the read power, internal power and absorbed power vs temperature in one figure"""
     S21data = io.get_S21data(Chipnum, KIDnum, Pread)
 
     if ax is None:
@@ -314,7 +308,7 @@ def PowersvsT(Chipnum, KIDnum, density=False, phnum=False, fig=None, axs=None):
     Preadar = io.get_S21Pread(Chipnum, KIDnum)
     cmap = matplotlib.cm.get_cmap("plasma")
     norm = matplotlib.colors.Normalize(-1.05 * Preadar.max(), -0.95 * Preadar.min())
-    clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap))
+    clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axs[-1])
     clb.ax.set_title(r"$P_{read}$ (dBm)")
     for Pread in Preadar:
         S21data = io.get_S21data(Chipnum, KIDnum, Pread)

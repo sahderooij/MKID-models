@@ -2,6 +2,7 @@ import numpy as np
 import cmath
 import warnings
 from scipy.integrate import quad
+import matplotlib.pyplot as plt
 
 def cot(angle):
     '''the cotangens defined via numpy'''
@@ -131,7 +132,8 @@ class Interface(object):
         
     def eta_SV_angle(self, gamma1, rettottrans=True):
         '''Transverse, Shear Vertical polarization, phonon transparency
-        with incoming phonon at angle gamma1'''
+        with incoming phonon at angle gamma1.
+        If rettottrans is True, the total transmission is returned. '''
         #mask 0's by a really small number to catch nans
         if gamma1 == 0: 
             gamma1= 1e-18
@@ -215,3 +217,24 @@ class Interface(object):
         (as eta will be come greater than 1)'''
         return ((2*self.eta_t/self.sol1.cT**2 + self.eta_l/self.sol1.cL**2)
                 * (2/self.sol1.cT**3 + 1/self.sol1.cL**3)**(-2/3))
+    
+    def plot_eta_angles(self, nrpoints=100):
+        plt.figure()
+        angles = np.linspace(0, np.pi/2, nrpoints)
+        eta_ls = np.array([self.eta_l_angle(angles[i]) for i in range(len(angles))])
+        eta_SHs = np.array([self.eta_SH_angle(angles[i]) for i in range(len(angles))])
+        eta_SVs = np.array([self.eta_SV_angle(angles[i]) for i in range(len(angles))])
+        eta_ts = (eta_SHs + eta_SVs)/2
+        plt.plot(angles, eta_ls, label='L')
+        plt.plot(angles, eta_SHs, label='SH')
+        plt.plot(angles, eta_SVs, label='SV')
+        # plt.plot(angles, eta_ts, label='T')
+        plt.plot(angles, 2*np.sin(angles)*np.cos(angles), label='angle dist.', 
+                color='k')
+        plt.axvline(self.critLL, color='k', linestyle='--')
+        plt.axvline(self.critLT, color='k')
+        plt.axvline(self.critTL, color='.5')
+        plt.axvline(self.critTT, color='.5', linestyle='--')
+        plt.xlabel('Angle (rad.)')
+        plt.ylabel('$\eta$')
+        plt.legend()

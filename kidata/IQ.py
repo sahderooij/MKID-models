@@ -103,6 +103,7 @@ def view_bins(path, coordinates='ampphase', sel='',
         axs[1].plot(phase)
         axs[0].plot(amp, color="orange")
         axs[1].set_xlabel("time point")
+        fig.suptitle(file)
 
     interact(
         plotbin, file=np.sort([i.split("\\")[-1]

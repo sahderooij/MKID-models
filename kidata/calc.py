@@ -33,32 +33,33 @@ def ak(S21data, SC=None, plot=False, reterr=False, method="df_nonlin", Tmin=None
     optionally: the error in ak from fitting."""
 
     if SC is None:
-        SC = SuperCond.Al(Tc=S21data[0, 21])
+        SC = SuperCond.Al
+        SC.kbTc = 86.17 * S21data[0, 21]
     if Tmin is None:
         Tmin = SC.kbTc / const.Boltzmann * const.e * 1e-6 / 5
-        #This only works for high temperature points, as then sigma needs to change signaficantly
+        #This only works for high temperature points, as sigma needs to change signaficantly
 
     # Extract relevant data
     hw = S21data[:, 5] * const.Planck / const.e * 1e6  # µeV
     kbT = S21data[:, 1] * const.Boltzmann / const.e * 1e6  # µeV
     Qi = S21data[:, 4]
     
-    hw0 = hw[0]
+    hw0 = hw[np.argmin(S21data[:, 1] - Tmin)]
+    kbT0 = kbT[np.argmin(S21data[:, 1] - Tmin)]
+    Qi0 = Qi[np.argmin(S21data[:, 1] - Tmin)]
     
     # define y to fit:
     if method == "df":
         y = (hw - hw0) / hw0
     elif method == "Qi":
-        y = 1 / Qi - 1 / Qi[0]
+        y = 1 / Qi - 1 / Qi0
     elif method == 'df_nonlin':
-        y = (hw[0]/hw)**2 - 1
-
+        y = (hw0/hw)**2 - 1
+        
     # define x to fit:
-    x, ak = np.zeros((2, len(y)))
-    D0 = SCth.D(kbT[0], SC)
-    s_0 = SCth.cinduct(hw[0], D0, kbT[0])
-    s0 = SCth.cinduct(hw0, SCth.D(kbT[0], SC), kbT[0])
-    Lk0 = s_0[1]/((s_0[0]**2+s_0[1]**2)*hw[0]) # This is low T, thin film (d << pen.depth) limit
+    x = np.zeros(len(y))
+    s0 = SCth.cinduct(hw0, SCth.D(kbT0, SC), kbT0)
+    Lk0 = s0[1]/((s0[0]**2+s0[1]**2)*hw0) # This is low T, thin film (d << pen.depth) limit
     for i, kbTi in enumerate(kbT):
         D_0 = SCth.D(kbTi, SC)
         s = SCth.cinduct(hw[i], D_0, kbTi)
@@ -66,7 +67,6 @@ def ak(S21data, SC=None, plot=False, reterr=False, method="df_nonlin", Tmin=None
                          SuperCond.Sheet(
                              SC, d=S21data[0, 25]))
         Lk = s[1]/((s[0]**2+s[1]**2)*hw[i])
-        ak[i] = (1-(hw[i]/hw[0])**2)/(1-Lk0/Lk)
         if method == "df":
             x[i] = (s[1] - s0[1]) / s0[1] * beta / 4
         elif method == "Qi":
@@ -88,8 +88,13 @@ def ak(S21data, SC=None, plot=False, reterr=False, method="df_nonlin", Tmin=None
     
     # check if result is correct
     if (fit[0][0] >= 1) or (fit[0][0] < 0):
-        warnings.warn(f'ak is {fit[0][0]}, which is wrong. '+
+        warnings.warn(f'\nak is {fit[0][0]}, which is wrong. '+
                       'Probably the temperature is too low, or ak is too close to 1')
+
+    if (fit[0][0] >= .22) and (method == 'df'):
+        warnings.warn(
+            f'\nThe df method gives an error more than 10%:'
+            + f'\n error = {(1/(1-fit[0][0]/2)-1)*100:.2f}%')
     
     if plot:
         plt.figure()
@@ -297,6 +302,16 @@ def NLcomp(Chipnum, KIDnum, Pread, SCvol=None, method="", var="cross"):
         lvlcompspl = interpolate.splrep(np.linspace(0.01, 10, 10), np.ones(10))
     return lvlcompspl
 
+def Nqp(chip, KID, Pread, spec='cross'):
+    '''Calculates the Nqp vs T (in mK) from GR noise and S21 data'''
+    specdict = {'amp': 0, 'phase': 1, 'cross': 2}
+    fits = io.get_noisefits(chip, KID, Pread)
+    tau, tauerr, lvl, lvlerr = fits[:, (specdict[spec] * 4 + 1):(specdict[spec] * 4 + 5)].T
+    rspnsv = Respspl(chip, KID, Pread, var=spec)
+    Nqp = lvl / (4 * tau * 1e-6) / interpolate.splev(fits[:, 0] * 1e-3, rspnsv)**2
+    Nqperr = np.sqrt((Nqp / lvl * lvlerr)**2 + (Nqp / tau * tauerr)**2)
+    return fits[:, 0], Nqp, Nqperr
+                
 
 def tesc(
     Chipnum,
@@ -308,7 +323,6 @@ def tesc(
     taunonkaplan=2e2,
     taures=1e1,
     relerrthrs=0.2,
-    pltfit=False,
     pltkaplan=False,
     reterr=False,
     defaulttesc=0,
@@ -320,46 +334,34 @@ def tesc(
     From the remaining lifetimes, tesc is calculated and averaged. The error (optional return) 
     is the variance of the tesc values. If this fails, defaulttesc is returned."""
 
-    TDparam = io.get_grTDparam(Chipnum)
-    Pread = _selectPread(usePread, io.get_grPread(TDparam, KIDnum))[0]
+    KIDPrT = io.get_noiseKIDPrT(Chipnum)
+    Preads = KIDPrT[KIDPrT[:, 0] == KIDnum, 1]
+    Pread = selectPread(usePread, Preads)[0]
     if SCvol is None:
         S21data = io.get_S21data(Chipnum, KIDnum)
-        SCvol = SuperCond.Volume(
-            SuperCond.Al(Tc=S21data[0, 21]),
-            V=S21data[0, 14],
-            d=S21data[0, 25])
+        SCvol = SuperCond.init_SC(Chipnum, KIDnum, set_tesc=False)
 
-    Temp = io.get_grTemp(TDparam, KIDnum, Pread)
-    Temp = Temp[np.logical_and(Temp < maxTemp, Temp > minTemp)]
-    tescar, tescarerr, tqpstar, tqpstarerr = np.zeros((4, len(Temp)))
-    for i in range(len(Temp)):
-        if pltfit:
-            print("{} KID{} -{} dBm T={} mK".format(Chipnum, KIDnum, Pread, Temp[i]))
-        freq, SPR = io.get_grdata(TDparam, KIDnum, Pread, Temp[i])
-        tqpstar[i], tqpstarerr[i] = noise.fit.Lorspec(freq, SPR, plot=pltfit)[:2]
+    fits = io.get_noisefits(Chipnum, KIDnum, Pread)
+    mask = (fits[:, 0] < maxTemp) & (fits[:, 0] > minTemp)
+    tescar = SCth.tau.esc(
+        const.Boltzmann / const.e * 1e6 * fits[:, 0] * 1e-3, fits[:, 9],
+        SCvol.SC)
+    tescarerr = np.abs(
+        SCth.tau.esc(
+            const.Boltzmann / const.e * 1e6 * fits[:, 0] * 1e-3,
+            fits[:, 10], SCvol.SC) 
+        + SCvol.SC.tpb)
+    
+    mask = ((fits[:, 0] < maxTemp) & (fits[:, 0] > minTemp) 
+            & (fits[:, 10]/fits[:, 9] < relerrthrs)
+            & (fits[:, 9] < taunonkaplan)
+            & (fits[:, 9] > taures))
 
-        if tqpstarerr[i] / tqpstar[i] > relerrthrs or (
-            tqpstar[i] > taunonkaplan or tqpstar[i] < taures
-        ):
-            tescar[i] = np.nan
-        else:
-            tescar[i] = SCth.tau.esc(
-                const.Boltzmann / const.e * 1e6 * Temp[i] * 1e-3, tqpstar[i],
-                SCvol.SC
-            )
-            tescarerr[i] = np.abs(
-                SCth.tau.esc(
-                    const.Boltzmann / const.e * 1e6 * Temp[i] * 1e-3,
-                    tqpstarerr[i], SCvol.SC
-                )
-                + SCvol.SC.tpb
-            )
-
-    if tescar[~np.isnan(tescar)].size > 0:
-        tesc1 = np.mean(tescar[~np.isnan(tescar)])
+    if mask.sum() > 0:
+        tesc1 = np.mean(tescar[mask])
         tescerr = np.sqrt(
-            np.std(tescar[~np.isnan(tescar)]) ** 2
-            + ((tescarerr[~np.isnan(tescar)] / (~np.isnan(tescar)).sum()) ** 2).sum()
+            np.std(tescar[mask]) ** 2
+            + ((tescarerr[mask] / (mask.sum())) ** 2).sum()
         )
     else:
         tesc1 = np.nan
@@ -372,19 +374,17 @@ def tesc(
         )
         tesc1 = defaulttesc
         tescerr = 0
+        
     SCvol.tesc = tesc1
     if pltkaplan:
         plt.figure()
-        plt.errorbar(Temp, tqpstar, yerr=tqpstarerr, capsize=5.0, fmt="o")
-        mask = ~np.isnan(tescar)
-        plt.errorbar(Temp[mask], tqpstar[mask], fmt="o")
-        try:
-            T = np.linspace(
-                Temp[~np.isnan(tqpstar)].min(),
-                Temp[~np.isnan(tqpstar)].max(), 100
-            )
-        except ValueError:
-            T = np.linspace(minTemp, maxTemp, 100)
+        plt.errorbar(fits[:, 0], fits[:, 9], yerr=fits[:, 10], capsize=5.0, fmt="o")
+        plt.errorbar(fits[mask, 0], fits[mask, 9], fmt="o")
+        T = np.linspace(
+            fits[mask, 0].min(),
+            fits[mask, 0].max(), 100
+        )
+
         taukaplan = SCth.tau.qpstar(T * 1e-3, SCvol)
         plt.plot(T, taukaplan)
         plt.yscale("log")
@@ -416,7 +416,7 @@ def NqpfromQi(S21data, uselowtempapprox=True, SC=SuperCond.Al):
     If uselowtempapprox, the complex impedence is calculated directly with a low 
     temperature approximation, else it\'s calculated with the cinduct function in SCth 
     (slow)."""
-    ak_ = ak(S21data)
+    ak_ = ak(S21data, SC)
     hw = S21data[:, 5] * const.Plack / const.e * 1e6
     kbT = S21data[:, 1] * const.Boltzmann / const.e * 1e6
 

@@ -5,6 +5,7 @@ import SC
 import numpy as np
 import matplotlib.pyplot as plt
 import copy
+import warnings
 import scipy.special as sp
 import scipy.constants as const
 from scipy.optimize import minimize_scalar
@@ -25,9 +26,13 @@ class CPW(object):
     """Class to calculate CPW properties, such as vph, Z0 and ak.
     Give S,W and l in µm"""
 
-    def __init__(self, SCsheet, S, W, eeff, l=1):
+    def __init__(self, SCsheet, W, S=None, eeff=6.22, l=1):
+        if (type(SCsheet) is SC.Wire) and (S is None):
+            S = SCsheet.w
+        else:
+            self.S = S * 1e-6
+
         self.SCsheet = SCsheet
-        self.S = S * 1e-6
         self.W = W * 1e-6
         self.eeff = eeff
         self.l = l * 1e-6
@@ -39,6 +44,8 @@ class CPW(object):
 
     @property
     def gc(self):
+        if not self.gfactorsvalid:
+            warnings.warn('S, W and d dimensions do not allow g-factor approximation')
         return (
             np.pi
             + np.log(4 * np.pi * self.S / (self.SCsheet.d * 1e-6))
@@ -47,6 +54,8 @@ class CPW(object):
 
     @property
     def gg(self):
+        if not self.gfactorsvalid:
+            warnings.warn('S, W and d dimensions do not allow g-factor approximation')
         return (
             self.k
             * (
@@ -56,6 +65,10 @@ class CPW(object):
             )
             / (4 * self.S * (1 - self.k ** 2) * sp.ellipk(self.k ** 2) ** 2)
         )
+    
+    @property
+    def gfactorsvalid(self):
+        return ((self.SCsheet.d < 0.05*self.S) and (self.W > 0.3*self.S))
 
     @property
     def xi(self):
@@ -95,7 +108,7 @@ class CPW(object):
 
     @property
     def fres(self):
-        return self.vph / self.l
+        return self.vph / self.l     
 
     # METHODS
     def beta(self, f):
@@ -110,14 +123,29 @@ class CPW(object):
                 [1j / Z0 * np.sin(beta * self.l), np.cos(beta * self.l)],
             ]
         )
+    
+    def att_c(self, f):
+        '''attenuation constant for radiation for frequency f [Hz] in dB/m'''
+        if f > 2*self.SCsheet.SC.D0*1e-6*const.e/const.Planck:
+            Rs = self.SCsheet.Rs * 1e-6 #[Ohm]
+        else:
+            Rs = 0
+        return (Rs*(self.gc + self.gg)/(2*self.Z0)) * 8.686
+    
+    def att(self, f):
+        '''attenuation of the CPW in dB''' 
+        return self.att_c(f) * self.l
 
 
 class hyCPW(CPW):
     '''Hybrid CPW, with a different sheet for ground plane (gSCsheet)
     and central line (cSCsheet).'''
 
-    def __init__(self, gSCsheet, cSCsheet, S, W, eeff, l=1):
-        CPW.__init__(self, None, S, W, eeff, l=l)
+    def __init__(self, gSCsheet, cSCsheet, W, S=None, eeff=6.22, l=1):
+        if type(cSCsheet) is SC.Wire and (S is None):
+            S = cSCsheet.w
+            
+        CPW.__init__(self, None, W, S, eeff, l=l)
         self.gSCsheet = gSCsheet
         self.cSCsheet = cSCsheet
 
@@ -128,6 +156,8 @@ class hyCPW(CPW):
 
     @property
     def gc(self):
+        if not self.gfactorsvalid:
+            warnings.warn('S, W and d dimensions do not allow g-factor approximation')
         return (
             np.pi
             + np.log(4 * np.pi * self.S / (self.cSCsheet.d * 1e-6))
@@ -136,6 +166,8 @@ class hyCPW(CPW):
 
     @property
     def gg(self):
+        if not self.gfactorsvalid:
+            warnings.warn('S, W and d dimensions do not allow g-factor approximation')
         return (
             self.k
             * (
@@ -146,7 +178,34 @@ class hyCPW(CPW):
             )
             / (4 * self.S * (1 - self.k ** 2) * sp.ellipk(self.k ** 2) ** 2)
         )
+    
+    @property
+    def gfactorsvalid(self):
+        return ((self.gSCsheet.d < 0.05*self.S) 
+                and (self.cSCsheet.d < 0.05*self.S) 
+                and (self.W > 0.3*self.S))
 
+    def Z0_MB(self, f, T):
+        '''Characteristic impedance of the hyCPW line, with the 
+        Kinetic inductance from Mattis-Bardeen, 
+        at frequency f [Hz] and temperature T [K]. Returns in Ohm'''
+        hw = const.Planck * f /const.e * 1e6 # µeV
+        omg = 2*np.pi*f * 1e-6 # 1/(µs)
+        kbT = const.Boltzmann * T /const.e * 1e6 # µeV
+        Lkl = (self.gSCsheet.Zs(kbT, hw).imag/omg * self.gg * 1e-6 + 
+               self.cSCsheet.Zs(kbT, hw).imag/omg * self.gc * 1e-6) #pH/µm
+        return np.sqrt((self.Lgl + Lkl*1e-6) / self.Cl)
+
+    def att_c(self, f, T):
+        '''attenuation constant in dB/m, at frequency f [Hz] and temperature T [K]'''
+        hw = const.Planck * f /const.e * 1e6 # µeV
+        kbT = const.Boltzmann * T /const.e * 1e6 # µeV
+        return ((self.gSCsheet.Zs(kbT, hw).real * self.gg * 1e-6 
+                 + self.cSCsheet.Zs(kbT, hw).real * self.gc * 1e-6)
+                /(2*self.Z0_MB(f, T)) 
+                * 8.686) # from Np to dB
+        
+### KID classes
 
 class Coupler(object):
     '''Object that represents the capcitive coupler from (quarterwave) KID to TL'''

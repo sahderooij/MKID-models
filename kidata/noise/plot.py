@@ -105,6 +105,7 @@ def PSDs(chip, KIDs=None, pltPreads='all', Tminmax=(None, None), specinds=[0, 1,
                     ax.set_title(titledict[specind])
                     ax.set_xlabel('Frequency (Hz)')
                 axs[0].set_xscale('log')
+                axs[0].set_ylabel('Noise level (dBc/Hz)')
                 clb = plt.colorbar(
                         matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axs[-1]
                     )
@@ -122,12 +123,12 @@ def fits(chip, KIDs=None, pltPreads='all', Tminmax=(None, None), relerrthrs=.2):
                 sharex=True,
                 sharey='row')
         fig.suptitle(f"{chip}, KID{KID}")
-        cmap = matplotlib.cm.get_cmap("plasma")
+        cmap = matplotlib.colormaps["plasma"]
         norm = matplotlib.colors.Normalize(-Preads.max(), -Preads.min())
         for Pread in Preads:
             fit = io.get_noisefits(chip, KID, Pread)
             if Tminmax != (None, None):
-                mask1 = ((fit[:, 0] > Tminmax[0]) & fit[:, 0] < Tminmax[1])
+                mask1 = ((fit[:, 0] > Tminmax[0]) & (fit[:, 0] < Tminmax[1]))
             else:
                 mask1 = np.ones(len(fit[:, 0]), dtype='bool')
 

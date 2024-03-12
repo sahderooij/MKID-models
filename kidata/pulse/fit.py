@@ -2,6 +2,7 @@ import numpy as np
 import warnings
 import matplotlib.pyplot as plt
 import os
+import json
 import glob
 from tqdm.notebook import tnrange
 from ipywidgets import interact
@@ -70,6 +71,7 @@ def exp(
         plt.plot(t, pulse)
         plt.plot(t2, fit[0][1] * np.exp(-t2 / fit[0][0]))
         plt.yscale("log")
+        plt.ylim(1e-4, pulse.max()*2)
         plt.show()
         plt.close()
     if reterr:
@@ -112,8 +114,8 @@ def nonexp(
     
     if tsstfit is None:
         pulset = t[t>0]
-        noisestd = np.std(pulse[:pulsestart])
-        closemask = np.abs(pulse[t>0] - noisestd*1e-1) < noisestd*1e-2
+        noisestd = np.std(pulse[:(pulsestart-5)])
+        closemask = pulse[t>0]  < noisestd*1e-1
         if any(closemask):
             tsstfitmax = pulset[closemask][0]
         else:
@@ -150,7 +152,7 @@ def nonexp(
         fig, axs = plt.subplots(2, 1, figsize=(5, 7), sharex=True)
         for ax in axs:
             ax.plot(t, pulse, '.', label='data')
-            ax.axhline(np.std(pulse[:pulsestart])*1e-1, color='k')
+            ax.axhline(np.std(pulse[:pulsestart])*1e-1, color='k', label='std/10')
             ax.plot(t2, nonexp_func(t2, tss, A, B), 'r', label='1/t + exp. fit')
             ax.plot(t[pulsestart:], nonexp_func(t[pulsestart:],tss, A, B),
                  'r--')
@@ -229,6 +231,10 @@ def nonexps(fld, coord='ampphase', **nonexpkwargs):
                           + 'phase B (arb.), phase B err (arb.),')
                   )
         
+    with open(f"{resultpath}/fitoptions.json", "w") as fp:
+        json.dump(nonexpkwargs, fp)
+
+        
 def show(fld, pulsestart=100, coords='ampphase'):
     '''Plots the fitted Lorentzians together with PSD for amp, phase and cross.
     Needs interactive matplotlib back-end''' 
@@ -260,7 +266,7 @@ def show(fld, pulsestart=100, coords='ampphase'):
                 if j==0:
                     ax.legend(loc=(0, 1), title=coord)
                 if j==1:
-                    ax.set_ylim(1e-4, None)
+                    ax.set_ylim(1e-4, 2*avgpulse[:, 2].max())
             axs[1, j].set_yscale('log')
             axs[1, j].set_xlabel('Time (1/fs)')
             axs[j, 0].set_ylabel('Response')

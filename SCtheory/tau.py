@@ -7,12 +7,19 @@ import scipy.constants as const
 def hbar():
     return const.hbar * 1e12 / const.e
 
-def qpstar(T, SCsheet):
+
+############################### Kaplan 1976 #################################
+
+def qpstar(kbT, SCsheet, uselowTapprox=False):
     """Calculates the apparent quasiparticle lifetime from Kaplan. 
+    (incl. phonon trapping)
     See PdV PhD eq. (2.29)"""
     SC = SCsheet.SC
-    D_ = SCth.D(const.Boltzmann / const.e * 1e6 * T, SC)
-    nqp_ = SCth.nqp(const.Boltzmann / const.e * 1e6 * T, D_, SC)
+    if uselowTapprox:
+        D_ = SC.D0 * np.ones(len(kbT))
+    else:
+        D_ = SCth.D(kbT, SC)
+    nqp_ = SCth.nqp(kbT, D_, SC)
     return (
         SC.t0 * SC.N0 * SC.kbTc ** 3 / (4 * nqp_ * D_ ** 2) *
         (1 + SCsheet.tesc / SC.tpb)
@@ -22,7 +29,7 @@ def qpstar(T, SCsheet):
 def qp_kaplan(kbT, SC):
     """Calculates the intrinsic quasiparticle lifetime w.r.t recombination at E=Delta
     from Kaplan1976 and uses the intral form s.t. it holds for all temperatures.
-    Still, a^2F(omega)=b omega^2 is assumed."""
+    a^2F(omega)=b omega^2 is assumed."""
     D_ = SCth.D(kbT, SC)
 
     def integrand(E, D, kbT):
@@ -43,28 +50,34 @@ def qp_kaplan(kbT, SC):
     )
 
 
-def scat_kaplan(kbT, SC):
+def scat_kaplan(kbT, SC, uselowTapprox=False):
     """Calculates the intrinsic quasiparticle lifetime w.r.t scattering at E=Delta
     from Kaplan1976 and uses the intral form s.t. it holds for all temperatures.
-    Still, a^2F(omega)=b omega^2 is assumed."""
-    D_ = SCth.D(kbT, SC)
-
-    def integrand(E, D, kbT):
+    a^2F(omega)=b omega^2 is assumed."""
+    if uselowTapprox:
+        return (SC.t0 
+                /(gamma(7/2) * zeta(7/2) 
+                    * (SC.kbTc/(2*SC.D0))**.5 
+                    * (kbT / SC.kbTc)**(-7/2)))
+    else:
+        D_ = SCth.D(kbT, SC)
+    
+        def integrand(E, D, kbT):
+            return (
+                E ** 2
+                * (E + D)
+                / np.sqrt((E + D) ** 2 - D ** 2)
+                * (1 - D ** 2 / (D * (E + D)))
+                * SCth.n(E, kbT)
+                * (1 - SCth.f(E + D, kbT))
+            )
+    
         return (
-            E ** 2
-            * (E + D)
-            / np.sqrt((E + D) ** 2 - D ** 2)
-            * (1 - D ** 2 / (D * (E + D)))
-            * SCth.n(E, kbT)
-            * (1 - SCth.f(E + D, kbT))
+            SC.t0
+            * SC.kbTc ** 3
+            * (1 - SCth.f(D_, kbT))
+            / integrate.quad(integrand, 0, np.inf, args=(D_, kbT))[0]
         )
-
-    return (
-        SC.t0
-        * SC.kbTc ** 3
-        * (1 - SCth.f(D_, kbT))
-        / integrate.quad(integrand, 0, np.inf, args=(D_, kbT))[0]
-    )
 
 def esc(kbT, tqpstar, SC):
     """Calculates the phonon escape time, based on tqp* via Kaplan. Times are in µs."""
@@ -99,12 +112,15 @@ def G(x):
                                 np.tanh(theta) + fldt * np.pi/2))
             ))
 
+def Z(sc):
+    '''The real part of the Elaisberg renormalization constant Z'(w)=Z'(D)=Z'(0)'''
+    return sc.lbd_eph_clean + 1
+
 
 def scat_DB_Coulomb(kbT, SCsheet):
     sc = SCsheet.SC
-    Z = sc.lbd_eph + 1
     rhohat = sc.rhon / sc.rhoM
-    return hbar()/(sc.D0/Z *  rhohat * 
+    return hbar()/(sc.D0/Z(sc) *  rhohat * 
             (3 * np.pi**(7/3)) / (4*np.sqrt(2)*(1+np.pi)) *
             sc.D0/sc.EF * 
             G(x(SCsheet)) * SCsheet.SC.xi0 / SCsheet.d * 
@@ -114,12 +130,11 @@ def scat_DB_Coulomb(kbT, SCsheet):
 
 def scat_eph2(kbT, SCsheet):
     sc = SCsheet.SC
-    Z = sc.lbd_eph + 1
     rhohat = sc.rhon / sc.rhoM
     return (hbar() /
-            (sc.D0/Z**2 * (1 + 6/np.pi*(4*sc.lbd_eph-3/2)*rhohat) *
+            (sc.D0/Z(sc)**2 * (1 + 6/np.pi*(4*sc.lbd_eph_clean-3/2)*rhohat) *
             rhohat**(1/2) * 9*np.pi**2*np.sqrt(6)/5 * 
-            gamma(7/2) * zeta(7/2) * sc.lbd_eph * 
+            gamma(7/2) * zeta(7/2) * sc.lbd_eph_clean * 
             (sc.cL/sc.cT)**4 *
             (sc.D0/sc.kbTD)**2 *
             (sc.D0/sc.EF)**(3/2) * 
@@ -145,14 +160,13 @@ def db(SCsheet, cb, D):
         rhoi = sc.rho * SCsheet.d
     return sc.kF**(D+1) / (16*np.pi*cb*rhoi) * hbar()
 
-def _scat_eph_2D(kbT, sc, Z):
+def _scat_eph_2D(kbT, sc):
     return (hbar()
-            /(2*np.sqrt(2)*sc.D0/sc.EF*(kbT/sc.D0)**(5/2)*sc.D0/Z))
+            /(2*np.sqrt(2)*sc.D0/sc.EF*(kbT/sc.D0)**(5/2)*sc.D0/Z(sc)))
 
 def scat_eph_2D_disorder(kbT, SCsheet):
     sc = SCsheet.SC
-    Z = sc.lbd_eph + 1 
-    return (_scat_eph_2D(kbT, sc, Z) / (
+    return (_scat_eph_2D(kbT, sc) / (
             db(SCsheet, sc.cT, 2) *         
             sc.vF**3 / sc.cT**3 * (1 + (sc.cT/sc.cL)**4) * 
             gamma(7/2) * zeta(7/2) * np.pi / (2*sc.rhon*1e-2/SCsheet.d/4108)*kbT/sc.EF)
@@ -160,41 +174,38 @@ def scat_eph_2D_disorder(kbT, SCsheet):
 
 def scat_eph_2D(kbT, SCsheet):
     sc = SCsheet.SC
-    Z = sc.lbd_eph + 1 
-    return (_scat_eph_2D(kbT, sc, Z) / (
+    return (_scat_eph_2D(kbT, sc) / (
             db(SCsheet, sc.cL, 2) * 
             sc.vF**2 / sc.cL**2 * gamma(5/2) * zeta(5/2))
            )
 
-def _recomb_eph_2D(kbT, sc, Z):
+def _recomb_eph_2D(kbT, sc):
     return (hbar()
-            /(8*np.pi*sc.D0/Z*np.sqrt(np.pi*kbT/(2*sc.D0)) * np.exp(-sc.D0/kbT))
+            /(8*np.pi*sc.D0/Z(sc)*np.sqrt(np.pi*kbT/(2*sc.D0)) * np.exp(-sc.D0/kbT))
            )
             
 def recomb_eph_2D_disorder(kbT, SCsheet):
     sc = SCsheet.SC
-    Z = sc.lbd_eph + 1
-    return (_recomb_eph_2D(kbT, sc, Z) / (
-        2*sc.vF**3 * (sc.D0/sc.EF)**2 * db(SCsheet, sc.cT, 2) / sc.cT**3 * (1 + (sc.cT/sc.cL)**4) /
+    return (_recomb_eph_2D(kbT, sc) / (
+        2*sc.vF**3 * (sc.D0/sc.EF)**2 * db(SCsheet, sc.cT, 2) 
+        / sc.cT**3 * (1 + (sc.cT/sc.cL)**4) /
         (sc.rhon*1e-2/SCsheet.d/4108)))
         
 
 def recomb_eph_2D(kbT, SCsheet):
     sc = SCsheet.SC
-    Z = sc.lbd_eph + 1
-    return (_recomb_eph_2D(kbT, sc, Z) / (
+    return (_recomb_eph_2D(kbT, sc) / (
             2*sc.D0/sc.EF * db(SCsheet, sc.cL, 2) * sc.vF**2 / (np.pi * sc.cL**2))
            )
 
-### Gap contribution Y to scattering and recombination in 2 and 3D
+### Gap contribution Y to recombination in 2 and 3D
 #only holds in dirty limit
 def _eph2_3D(kbT, SCsheet):
     sc = SCsheet.SC
-    Z = sc.lbd_eph + 1 
     rhohat = sc.rhon / sc.rhoM
     mu = 1/2
     return hbar()/(
-        sc.D0/Z**2 * (rhohat**.5 + 6*(4*sc.lbd_eph - 3*mu)/np.pi*rhohat**(3/2))
+        sc.D0/Z(sc)**2 * (rhohat**.5 + 6*(4*sc.lbd_eph_clean - 3*mu)/np.pi*rhohat**(3/2))
         * db(SCsheet, sc.cT, 3) * 2*np.sqrt(6)/(5*np.sqrt(np.pi)) * sc.vF**4/sc.cT**4
         * (sc.D0/sc.EF)**(7/2) * (kbT/sc.D0)**(3/2)
         * (1 + 4/3*(sc.cT/sc.cL)**5)
@@ -208,17 +219,16 @@ def recomb_eph2_3D(kbT, SCsheet):
 
 def _eph2_2D(kbT, SCsheet):
     sc = SCsheet.SC
-    Z = sc.lbd_eph + 1 
     rhohat = sc.rhon / sc.rhoM
-    mu = 1/2
+    mu = 1/2 #perfect screening 
     Y1 = (sc.D0 * sc.rhon*1e-2/SCsheet.d/4108 * np.log(2*sc.kF*sc.xi_DL)
-          * (sc.cL * sc.kF / (8*np.pi*sc.kbTD/hbar()) * sc.lbd_eph 
+          * (sc.cL * sc.kF / (8*np.pi*sc.kbTD/hbar()) * sc.lbd_eph_clean 
             * (1 - 2/np.pi*np.arcsin(1 - .5*(sc.kbTD/hbar()/(sc.kF*sc.cL))**2))
              - np.pi**-2)
          )
     return hbar()/(
         sc.D0*(1+Y1/sc.D0)*db(SCsheet, sc.cT, 2) * (sc.vF/sc.cT)**3
-        * 4/(np.sqrt(2*np.pi)*Z**2) * (sc.D0/sc.EF)**2 * (kbT/sc.D0)**(3/2)
+        * 4/(np.sqrt(2*np.pi)*Z(sc)**2) * (sc.D0/sc.EF)**2 * (kbT/sc.D0)**(3/2)
         * (1+(sc.cT/sc.cL)**4)
     )
 
@@ -277,24 +287,25 @@ def recomb_ee_3D_dirty(kbT, SCsheet):
 def eph_3D_disorder(kbT, sc):
     '''Electron-phonon inelastic scattering time for disordered normal metals.
     From RezierSergeyev1986, eq. 31. Note the typo in eq. 30!! that must be ^3 in the 
-    denominator; check Schmid1973 and SergeevMitin2000'''
+    denominator; check Schmid1973 and SergeevMitin2000.
+    This is the k=1 case of SergeevMitin2000, i.e. totally vibrating scatterers. '''
     beta = (2 * sc.EF / 3)**2 * sc.N0 / (2 * sc.rho * sc.cL**2)
     return hbar()**4/(
         np.pi**4 * beta / 5 * sc.kF * sc.l_e * kbT**4 / (sc.kF * sc.cL)**3
         * (1 + 3/2*(sc.cL/sc.cT)**5)
     )
 
-def recomb_eph_3D_disorder(kbT, SCsheet):
+def recomb_eph_3D_disorder(kbT, SCsheet, k=1):
     sc = SCsheet.SC
-    return eph_3D_disorder(sc.kbTc, sc)/(
+    return eph_3D_disorder_SM(sc.kbTc, sc, k)/(
         np.sqrt(np.pi) * (2*sc.D0/sc.kbTc)**(7/2) * (kbT/sc.kbTc)**.5
         * np.exp(-sc.D0/kbT)
         * 4*np.pi**2
     )
 
-def scat_eph_3D_disorder(kbT, SCsheet):
+def scat_eph_3D_disorder(kbT, SCsheet, k=1):
     sc = SCsheet.SC
-    return eph_3D_disorder(sc.kbTc, sc)/(
+    return eph_3D_disorder_SM(sc.kbTc, sc, k)/(
         gamma(9/2) * zeta(9/2) * (sc.kbTc/(2*sc.D0))**.5
         * (kbT/sc.kbTc)**(9/2)
         * 4*np.pi**2
@@ -325,9 +336,18 @@ def recomb_ee_2D(kbT, SCsheet):
     A2 = (1 + sc.lbd_eph**2)*(1 + np.sqrt(2)/4) + np.sqrt(2) * sc.lbd_eph**2
     return hbar()/(
         A2*_B(SCsheet)*kbT*sc.D0/(2*sc.EF)*np.exp(-2*sc.D0/kbT)
-    )
+    )  
+    
+########################### SERGEEV AND MITIN 2000 ##############################
+# This is for 3D metals 
 
-    
-    
-    
-    
+def eph_3D_disorder_SM(kbT, sc, k):
+    '''Impure case, eq. 51. k parameter dictates the scatic vs vibrating 
+    scattering behaviour. k=1 equals the ReizerSergeyev1986 and Schmid1973 case.'''
+    betaL = (2 * sc.EF / 3)**2 * sc.N0 / (2 * sc.rho * sc.cL**2)
+    betaT = (2 * sc.EF / 3)**2 * sc.N0 / (2 * sc.rho * sc.cT**2)
+    return hbar()**4/(
+        np.pi**4 * kbT**4 / 5 * sc.kF * sc.l_e * (
+            betaL/(sc.kF*sc.cL)**3 + 3*betaT/(2*(sc.kF*sc.cT)**3)*k)
+        + hbar()**2 * 3 * np.pi**2 * kbT**2 / (2 * sc.kF * sc.l_e) * (1 - k) * (
+            betaL/(sc.kF*sc.cL) + 2*betaT * k/(sc.kF*sc.cT)))
