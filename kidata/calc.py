@@ -35,6 +35,8 @@ def ak(S21data, SC=None, plot=False, reterr=False, method="df_nonlin", Tmin=None
     if SC is None:
         SC = SuperCond.Al
         SC.kbTc = 86.17 * S21data[0, 21]
+
+    sheet = SuperCond.Sheet(SC, d=S21data[0, 25])
     if Tmin is None:
         Tmin = SC.kbTc / const.Boltzmann * const.e * 1e-6 / 5
         #This only works for high temperature points, as sigma needs to change signaficantly
@@ -58,15 +60,12 @@ def ak(S21data, SC=None, plot=False, reterr=False, method="df_nonlin", Tmin=None
         
     # define x to fit:
     x = np.zeros(len(y))
-    s0 = SCth.cinduct(hw0, SCth.D(kbT0, SC), kbT0)
-    Lk0 = s0[1]/((s0[0]**2+s0[1]**2)*hw0) # This is low T, thin film (d << pen.depth) limit
+    s0 = SCth.cinduct(hw0, kbT0, SC)
+    Lk0 = s0[1]/((s0[0]**2 + s0[1]**2)*hw0*sheet.d) # thin film (d << pen.depth) limit
     for i, kbTi in enumerate(kbT):
-        D_0 = SCth.D(kbTi, SC)
-        s = SCth.cinduct(hw[i], D_0, kbTi)
-        beta = SCth.beta(kbTi, D_0, 
-                         SuperCond.Sheet(
-                             SC, d=S21data[0, 25]))
-        Lk = s[1]/((s[0]**2+s[1]**2)*hw[i])
+        s = SCth.cinduct(hw[i], kbTi, SC)
+        beta = SCth.beta(kbTi, SCth.D(kbTi, SC), sheet)
+        Lk = s[1]/((s[0]**2 + s[1]**2)*hw[i]*sheet.d)
         if method == "df":
             x[i] = (s[1] - s0[1]) / s0[1] * beta / 4
         elif method == "Qi":

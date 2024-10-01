@@ -110,8 +110,7 @@ def del_50Hz(freq, SPR):
     mask = (
         ((freq < 45) | (freq > 55)) 
         & ((freq < 140) | (freq > 160)) 
-        & ((freq < 670) | (freq > 920))
-        & ((freq < 200) | (freq > 400))
+        & ((freq < 220) | (freq > 380))
         & ((freq < 1e3) | (freq > 2e3))
     )
     return freq[mask], SPR[mask]

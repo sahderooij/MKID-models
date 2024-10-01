@@ -9,10 +9,11 @@ import scipy.integrate as integrate
 from scipy import interpolate
 import scipy.constants as const
 from scipy.optimize import minimize_scalar as minisc
+from scipy.optimize import root_scalar
 import warnings
+from multiprocess import Pool
 
-import SCtheory.tau, SCtheory.noise
-
+import SCtheory.tau, SCtheory.noise, SCtheory.Usadel
 
 def f(E, kbT):
     """The Fermi-Dirac distribution."""
@@ -32,9 +33,10 @@ def n(E, kbT):
             return np.exp(-E / kbT)
 
 
-def cinduct(hw, D_, kbT):
+def _cinduct(hw, kbT, SC, useD0lowT=False):
     """Mattis-Bardeen equations."""
-
+    D_ = D(kbT, SC, useD0lowT)
+    
     def integrand11(E, hw, D_, kbT):
         nume = 2 * (f(E, kbT) - f(E + hw, kbT)) * np.abs(E ** 2 + D_ ** 2 + hw * E)
         deno = hw * ((E ** 2 - D_ ** 2) * ((E + hw) ** 2 - D_ ** 2)) ** 0.5
@@ -55,6 +57,20 @@ def cinduct(hw, D_, kbT):
         s1 += integrate.quad(integrand12, D_ - hw, -D_, args=(hw, D_, kbT))[0]
     s2 = integrate.quad(integrand2, np.max([D_ - hw, -D_]), D_, args=(hw, D_, kbT))[0]
     return s1, s2
+
+def cinduct(hw, kbT, SC, useD0lowT=False):
+    if isinstance(kbT, (int, float, complex)):
+        return _cinduct(hw, kbT, SC, useD0lowT)
+    else:
+        s1, s2 = np.zeros((2, len(kbT)))
+        if isinstance(hw, (int, float, complex)):
+            hw = np.ones(len(kbT)) * hw
+        with Pool() as p:
+            for i, res in enumerate(p.imap(
+                lambda x: _cinduct(*x, SC, useD0lowT), zip(hw, kbT))):
+                s1[i], s2[i] = res
+        return s1, s2
+
 
 
 def D(kbT, SC, useD0lowT=False):
@@ -84,10 +100,8 @@ def D(kbT, SC, useD0lowT=False):
                     ]
                     - 1
                 )
-    
-            res = minisc(dint, args=(kbT, SC), method="bounded", bounds=(0, SC.D0))
-            if res.success:
-                return np.clip(res.x, 0, None)
+
+            return root_scalar(dint, args=(kbT, SC), x0=SC.D0, method='secant').root
 
 
 def nqp(kbT, D_, SC):
@@ -102,16 +116,11 @@ def nqp(kbT, D_, SC):
         def integrand(E, kbT, D_, SC):
             return 4 * SC.N0 * E / np.sqrt(E ** 2 - D_ ** 2) * f(E, kbT)
 
-        if any(
-            [
-                type(kbT) is float,
-                type(D_) is float,
-                type(kbT) is np.float64,
-                type(D_) is np.float64,
-            ]
-        ):  # make sure it can deal with kbT,D_ arrays
+        if isinstance(kbT, (int,  float, complex)):
             return integrate.quad(integrand, D_, np.inf, args=(kbT, D_, SC))[0]
         else:
+            if isinstance(D_, (int, float, complex)):
+                D_ = D_ * np.ones(len(kbT))
             assert kbT.size == D_.size, "kbT and D_ arrays are not of the same size"
             result = np.zeros(len(kbT))
             for i in range(len(kbT)):
@@ -148,7 +157,7 @@ def Zs(hw, kbT, SCsheet):
     '''The surface impendance of a superconducting sheet with arbitrary 
     thickness. Unit is µOhm'''
     D_ = D(kbT, SCsheet.SC)
-    s1, s2 = cinduct(hw, D_, kbT) / SCsheet.SC.rhon
+    s1, s2 = cinduct(hw, kbT, SCsheet.SC) / SCsheet.SC.rhon
     omega = hw / (const.hbar * 1e12 / const.e)
     return (np.sqrt(1j * const.mu_0 * 1e6 * omega / (s1 - 1j * s2))
             / np.tanh(np.sqrt(1j*omega*const.mu_0*1e6 * (s1 - 1j * s2)) * SCsheet.d)
@@ -163,7 +172,7 @@ def beta(kbT, D_, SCsheet):
     kbT -- temperature in µeV
     SC -- Superconductor object, from the SC class"""
     SC = SCsheet.SC
-    lbd = SC.lbd0 * 1 / np.sqrt(D_ / SC.D0 * np.tanh(D_ / (2 * kbT)))
+    lbd = SC.lbd_eff * 1 / np.sqrt(D_ / SC.D0 * np.tanh(D_ / (2 * kbT)))
     return 1 + 2 * SCsheet.d / (lbd * np.sinh(2 * SCsheet.d / lbd))
 
 
@@ -192,22 +201,21 @@ def S21(Qi, Qc, hwread, dhw, hwres):
     return (Q / Qi + 2j * Q * dhw / hwres) / (1 + 2j * Q * dhw / hwres)
 
 
-def hwread(hw0, kbT0, ak, kbT, D_, SCvol):
+def hwread(hw0, kbT0, ak, kbT, SCvol):
     """Calculates at which frequency, one probes at resonance. 
     This must be done iteratively, as the resonance frequency is 
     dependent on the complex conductivity, which in turn depends on the
     read frequency."""
-    # D_0 = D(kbT0, SC)
-    s20 = cinduct(hw0, D_, kbT0)[1]
+    s20 = cinduct(hw0, kbT0, SCvol.SC)[1]
 
-    def minfuc(hw, hw0, s20, ak, kbT, D_, SCvol):
-        s1, s2 = cinduct(hw, D_, kbT)
-        return np.abs(hwres(s2, hw0, s20, ak, kbT, D_, SCvol) - hw)
+    def minfuc(hw, hw0, s20, ak, kbT, SCvol):
+        s1, s2 = cinduct(hw, kbT, SCvol.SC)
+        return np.abs(hwres(s2, hw0, s20, ak, kbT, SCvol) - hw)
    
     res = minisc(
         minfuc,
         bracket=(0.5 * hw0, hw0, 2 * hw0),
-        args=(hw0, s20, ak, kbT, D_, SCvol),
+        args=(hw0, s20, ak, kbT, SCvol),
         method="brent",
         options={"xtol": 1e-21},
     )

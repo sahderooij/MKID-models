@@ -377,8 +377,8 @@ def Nphres(Chipnum, KIDnum, Pread=None, ax=None, label=None):
 
     T = S21data[:, 1] * 1e3
     Pint = S21data[:, 8]  # dBm
-    w = 2 * np.pi * S21data[:, 5] * 1e-6  # 1/µs
-    Nphres = 2 * np.pi * 10 ** (Pint / 10) / (const.hbar * 1e9 * w ** 2)
+    w = 2 * np.pi * S21data[:, 5]  # rad./s
+    Nphres = 2 * np.pi * 10 ** (Pint / 10) * 1e-3 / (const.hbar * w ** 2)
 
     ax.plot(T, Nphres, label=label)
     ax.set_xlabel("Temperature (mK)")
@@ -397,11 +397,11 @@ def Nphabsres(Chipnum, KIDnum, Pread=None, ax=None, label=None):
     Qc = S21data[:, 3]
     Qi = S21data[:, 4]
     T = S21data[:, 1] * 1e3
-    Pabs = 10 * np.log(10 ** (S21data[0, 7] / 10) / 2 * 4 * Q ** 2 / (Qi * Qc))
+    Pabs = 10 * np.log(10 ** (S21data[0, 7] / 10) / 2 * 4 * Q ** 2 / (Qi * Qc)) # mW
 
-    w = 2 * np.pi * S21data[:, 5] * 1e-6  # 1/µs
+    w = 2 * np.pi * S21data[:, 5] #rad./s
     Nphabsres = (
-        2 * np.pi * 10 ** (Pabs / 10) / (const.hbar * 1e9 * w ** 2) * S21data[0, 14]
+        2 * np.pi * 10 ** (Pabs / 10) *1e-3 / (const.hbar * w ** 2) * S21data[0, 14]
     )
 
     ax.plot(T, Nphabsres, label=label)

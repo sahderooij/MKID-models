@@ -9,18 +9,42 @@ from IPython.display import clear_output
 from ipywidgets import interact
 import glob
 import os
-from tqdm.notebook import tnrange
+from tqdm.notebook import tnrange, tqdm
 import warnings
 from scipy.signal import savgol_filter
+from multiprocess import Pool
 
 from kidata.IQ import to_ampphase, to_RX
 from kidata import io
 
 
+def calc_pulseavg_par(
+    filelocation, KIDPrT=None, save_location=None,
+    pulse_len=2000, start=500, minmax_proms=None, 
+    coord='ampphase', phasemax=2, numpulses=100
+):
+    if KIDPrT is None:
+        KIDPrT = np.unique(
+            io.get_avlfileids(filelocation)[:, (0, 1, 4)].astype(int), 
+            axis=0)
+
+    if minmax_proms is None:
+        minmax_proms = select_proms(
+            filelocation, KIDPrT, pulse_len, numpulses, coord)
+        
+    with Pool() as p:
+        for dummy in tqdm(p.imap(lambda file: 
+                            calc_pulseavg(
+                                filelocation, file, save_location,
+                                pulse_len, start, minmax_proms, coord),
+                            [KIDPrT[i:(i + 1), :] for i in range(len(KIDPrT[:, 0]))]),
+                          desc='KIDPrT', total=len(KIDPrT[:, 0])):
+            pass
+
 def calc_pulseavg(
     filelocation, KIDPrT=None, save_location=None,
     pulse_len=2000, start=500, minmax_proms=None, 
-    coord='ampphase', prctl=99.99, nstream=5
+    coord='ampphase', phasemax=2, numpulses=100
 ):
     """Script that runs a temp sweep of a certain data set and saves it.
     filelocation: the folder that contains .bin files.
@@ -60,7 +84,8 @@ def calc_pulseavg(
         
 
     if minmax_proms is None:
-        minmax_proms = select_proms(filelocation, KIDPrT, pulse_len, min(n_streams, nstream), coord, prctl)
+        minmax_proms = select_proms(
+            filelocation, KIDPrT, pulse_len, numpulses, coord, phasemax)
 
     KIDs = np.unique(KIDPrT[:, 0])
     for i in tnrange(len(KIDs), desc='KID', leave=False):
@@ -175,9 +200,9 @@ def calc_pulseavg(
                 )
 
 
-def select_proms(filelocation, KIDPrT=None, pulse_len=2e3, nstream=5, coord='ampphase', prctl=99.99):
+def select_proms(filelocation, KIDPrT=None, pulse_len=2e3, numpulses=100, coord='ampphase', phasemax=2.5):
     # Shows you nstream timestreams and a hist of the peaks and
-    # then asks you to select the wanted prominences
+    # then asks you to select the prominences
 
     if KIDPrT is None:
         KIDPrT = io.get_avlbins(filelocation)
@@ -193,17 +218,27 @@ def select_proms(filelocation, KIDPrT=None, pulse_len=2e3, nstream=5, coord='amp
                 clear_output(wait=True)
                 plt.clf()
                 total_prominences = np.empty(0)
-                for j in range(nstream):
+                j = 0
+                totpulses = 0
+                while totpulses < numpulses:
                     data = io.get_bin(filelocation, KID, Pread, temp, j)
+                    j += 1
                     if coord == 'ampphase':
                         amp, phase = to_ampphase(data)
                     elif coord == 'RX':
                         amp, phase = to_RX(data)
                     peaks, peakheight = find_peaks(
-                        phase, prominence=np.percentile(phase, prctl))
+                        phase, prominence=(np.abs(2*phase.min()), 
+                                           np.abs(phase.min()) + phasemax))
                     prominences = peakheight["prominences"]
-                    total_prominences = np.append(
-                        total_prominences, prominences, 0)
+                    if len(peaks) >= 1:
+                        totpulses += len(peaks)
+                        total_prominences = np.append(
+                            total_prominences, prominences, 0)
+                    else:
+                        total_prominences = []
+                        break
+                    
                 mu, sigma = norm.fit(total_prominences)
 
                 plt.figure()
@@ -213,7 +248,8 @@ def select_proms(filelocation, KIDPrT=None, pulse_len=2e3, nstream=5, coord='amp
                 plt.figure()
                 n, bins, patches = plt.hist(total_prominences, bins=30, density=True)
                 y = norm.pdf(bins, mu, sigma)
-                plt.plot(bins, y, 'r--', label='Gaussian fit')
+                plt.plot(bins, y, 'r--', label=(f'Gaussian fit\n $\\mu$={mu:.2f}\n'
+                         +f'$\\sigma$={sigma:.3f}\n R={(mu/(sigma * 2*np.sqrt(2*np.log(2)))):.1f}'))
                 plt.title("Histogram of found peaks")
                 plt.legend()
                 plt.show()
@@ -389,7 +425,7 @@ def movingaverage(peak, window):
     return avg
 
 
-def checkdoublepeak(peaks, locations, prominences, amount, tres):
+def checkdoublepeak(peaks, locations, prominences, amount):
     deleted = []
     for i in range(amount):
         peak = peaks[i, :]
@@ -425,9 +461,9 @@ def calctres(info_loc):
     return tres
 
 
-def view_pulses(Chipnum, KID, Pread, T, wvl, coord='ampphase', pulse_len=500, start=100,
+def view_pulses(Chipnum, KID, Pread, wvl, T, coord='ampphase', pulse_len=500, start=100,
                 logscale=True, movavg=False, wnd=9, suboff=False):
-    strms, locs, proms = io.get_avgpulseinfo(Chipnum, KID, Pread, T, wvl, coord=coord)
+    strms, locs, proms = io.get_pulseavginfo(Chipnum, KID, Pread, wvl, T, coord=coord)
     plt.ion()
 
     def show_pulse(pulse):

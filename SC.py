@@ -92,8 +92,9 @@ class Superconductor(object):
 
     @property
     def Ddata(self):
-        """To speed up the calculation for Delta, an interpolation of generated values is used.
-        Ddata_{SC}_{Tc}.npy contains this data, where a new one is needed 
+        """To speed up the calculation for Delta, 
+        an interpolation of generated values is used.
+        Ddata_{SC}_{Tc}.npy contains this data. A new data file is needed 
         for each superconductor (SC) and crictical temperature (Tc).
         This function returns the Ddata array."""
 
@@ -113,20 +114,18 @@ class Superconductor(object):
     @property
     def D0(self):
         """BSC relation"""
-        return 1.76 * self.kbTc
+        return 1.764 * self.kbTc
     
     @property
     def lbd0(self):
         """London penetration depth (i.e. at T = 0 K) in µm. 
         This only holds when Mattis-Bardeen can be used 
         (i.e. dirty limit or extreme anomalous limit)"""
-        return np.sqrt(
-            const.hbar * 1e12 / const.e
-            * self.rhon * 1e4
-            / (const.mu_0 * 1e6
-               * self.D0
-               * np.pi)
-        )
+        return np.sqrt(self.l_e #µm
+            * self.rhon * 1e-2 #Ohm µm
+            / (const.mu_0 # Ohm µs/µm
+               * self.vF # µm/µs)
+              ))
     
     @property
     def lbd_eff(self):
@@ -145,7 +144,7 @@ class Superconductor(object):
         if self.xi0/self.l_e > 10:  
             return np.sqrt(self.xi0 * self.l_e)
         else:
-            warnings.warn(f'Not in dirty limit xi0={self.xi0}, l={self.l}')
+            warnings.warn(f'Not in dirty limit xi0={self.xi0}, l={self.l_e}')
             
     @property
     def kappa_DL(self):
@@ -155,14 +154,14 @@ class Superconductor(object):
         return .715 * self.lbd0/self.l_e
     
     @property
-    def Hc1(self):
+    def Bc1(self):
         '''Lower critical field with Ginzberg-Landau with kappa>>1, near Tc'''
         if self.kappa_DL < 10:
             warnings.warn(f'Not in the high kappa limit: kappa={self.kappa_DL}')
         return const.Planck/(2*const.e) / (4*np.pi*(self.lbd_eff*1e-6)**2) * np.log(self.kappa_DL)
             
     @property
-    def Hc2(self):
+    def Bc2(self):
         '''Upper critical field at T=0 in T, calculated with dirty limit coherence length'''
         return const.Planck/(2*const.e) / (2* np.pi * (self.xi_DL*1e-6)**2)
     
@@ -312,7 +311,7 @@ bTa = Superconductor('bTa',
                      Tc=.87,
                      rhon=206.,
                      TD=221,
-                     N0=3.03e4,
+                     N0=2.06e4,
                      kF=1.4e4,
                      t0=81e-3, 
                      tpb=None, 
@@ -351,13 +350,13 @@ TiN = Superconductor('TiN',
                      cT=np.nan,
                      rho=5.7e3)
 
-# Sidorova
+# Sidorova2021
 NbTiN = Superconductor('NbTiN',
                        Tc=15.1,
                        rhon=115.,
                        TD=np.nan,
                        N0=3.7e4,
-                       kF=np.nan,
+                       kF=1.17e4,
                        t0=np.nan,
                        tpb=np.nan,
                        cL=np.nan,
@@ -365,12 +364,13 @@ NbTiN = Superconductor('NbTiN',
                        rho=3e3)
 
 # from Gershenzon1990, film 10 
+# kF from Ashcroft&Mermin
 Nb = Superconductor('Nb',
                     Tc=8.5,
                     rhon=15,
                     TD=276,
                     N0=7.9e4,
-                    kF=np.nan,
+                    kF=2.55e4,
                     t0=np.nan,
                     tpb=np.nan,
                     cL=np.nan,
@@ -490,9 +490,12 @@ class Vol(Wire):
         super().__init__(SC, d, w, tesc, tescerr)
         self.w = w
         if V is None:
+            self.l = l
             self.V = self.w * self.l * self.d
         elif l is None:
+            self.V = V
             self.l = self.V / (self.w * self.d)
+            
 
     def checkV(self):
         return self.w * self.l * self.d == self.V
@@ -510,7 +513,7 @@ def init_SCvol(Chipnum, KIDnum, SC_class=Al, rhon=np.nan, w=np.nan, set_tesc=Fal
     import kidata
 
     S21data = kidata.io.get_S21data(Chipnum, KIDnum)
-    SCvol = Vol(SC_class, V=S21data[0, 14],
+    SCvol = Vol(SC_class, w=w, V=S21data[0, 14], # use the area, i.e. V/d as width and length=1
                 d=S21data[0, 25])
     SCvol.SC.kbTc = 86.17 * S21data[0, 21]
     SCvol.SC.rhon = rhon

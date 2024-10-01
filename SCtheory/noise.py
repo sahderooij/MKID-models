@@ -18,7 +18,7 @@ def cinductresp_recomb(kbT, hw, sc):
     D = SCth.D(kbT, sc)
     nqp = SCth.nqp(kbT, D, sc)
     xi = hw / (2 * kbT)
-    s1, s2 = SCth.cinduct(hw, D, kbT)
+    s1, s2 = SCth.cinduct(hw, kbT, sc)
     
     ds1recomb = (nqp / (sc.N0 * hw) 
                  * np.sqrt(2*D**3/(np.pi * kbT**5)) 
@@ -33,7 +33,7 @@ def cinductresp_scat(kbT, hw, sc):
     D = SCth.D(kbT, sc)
     nqp = SCth.nqp(kbT, D, sc)
     xi = hw / (2 * kbT)
-    s1, s2 = SCth.cinduct(hw, D, kbT)
+    s1, s2 = SCth.cinduct(hw, kbT, sc)
     
     ds1scat = nqp / (sc.N0 * hw) * np.sqrt(D/(2*np.pi*kbT**3)) * \
                 (2*xi * (np.sinh(xi)*k1(xi)-np.cosh(xi)*k0(xi))-np.sinh(xi)*k0(xi))

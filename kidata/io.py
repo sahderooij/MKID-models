@@ -184,7 +184,7 @@ def get_pulseavg(Chipnum, KID, Pread, wvl, T, subfolder='', std=False, coord='am
     return data[:, ind], data[:, ind + 2]
 
 
-def get_pulseavgpinfo(Chipnum, KID, Pread, wvl, T, subfolder='', coord='ampphase'):
+def get_pulseavginfo(Chipnum, KID, Pread, wvl, T, subfolder='', coord='ampphase'):
     '''Returns the stream number (vis{nr}), location and prominence of
     the peaks used in the kidata.pulse.calc_avgpulse() function.'''
     strms, locs, proms = np.genfromtxt(
