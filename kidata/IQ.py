@@ -33,13 +33,19 @@ def to_ampphase(data, S21circle=None):
 
 
 
-def to_RX(data):
+def to_RX(data, x0):
     '''Converts IQ data to the non-linear (Smith) coördinates of Zobrist et al. 2021: 10.1117/1.JATIS.7.1.010501. 
-    These coördinates are normalized to the resonance circle.'''
+    These coördinates are normalized to the resonance circle.
+    x0 = Q/(2Qc) is needed for the proper coordinate transformation'''
     ndata = norm_radius(data)
-    g = ndata[:, 0] + 1j * ndata[:, 1]
-    z = (1 + g) / (1 - g)
-    return z.real, z.imag
+    Z = ndata[:, 0] + 1j * ndata[:, 1]
+    # Transform to proper Z from Zobrist2021
+    Z *= (1 - x0)
+    Z += x0
+    # Eqs 10, with x=xa=0
+    R = 2 * ( 2*x0 * (Z.real - np.abs(Z)**2)/np.abs(1 - Z)**2 - (1 - 2*x0))
+    X = 4 * x0 * ( Z.imag / (np.abs(1 - Z)**2) )
+    return R, X
     
 
 def subtr_offset(data, plot=False):

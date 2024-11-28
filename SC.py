@@ -192,13 +192,18 @@ class Superconductor(object):
 
     @property
     def tau0_clean(self):
-        '''Calculates the electron-phonon coupling time with eq. (10) of Kaplan1979, 
+        '''Calculates the electron-phonon coupling time with eq. (10) of Kaplan1976, 
         with Z' = 1 + lbd_eph_clean and b=lbd_eph_clean/kbTD**2 
         (see also Keck and Schmid 1979)'''
         return ((1 + 1/self.lbd_eph_clean) 
                 * (self.kbTD/self.kbTc)**2 
                 * const.hbar * 1e12 / const.e 
                 / (2*np.pi * self.kbTc))
+
+    @property
+    def R(self):
+        '''Recombination constant in µm^3/µs'''
+        return 2*self.D0**2/(self.kbTc**3 * self.t0 * self.N0)
         
     # phonon properties
     
@@ -302,8 +307,7 @@ Al = Superconductor('Al',
                      rho=2.5e3)
 
 
-# tau0 is calculated from the power law GR noise lifetimes in LT192,
-#     CPWs with tau0 = 4.2 tau_GR(Tc) (see Kaplan1979)
+# tau0 is from a comparison between ReizerSergeyev1986 and Kaplan1979
 # N0 and kF are calculated with the free electron model, 
 #     with the results from the magnetoresistance experiments of LT278.
 # The rest are constants for Ta from Abadias2019 and Magnuson2019
@@ -313,7 +317,7 @@ bTa = Superconductor('bTa',
                      TD=221,
                      N0=2.06e4,
                      kF=1.4e4,
-                     t0=81e-3, 
+                     t0=92e-3, 
                      tpb=None, 
                      cL=4.34e3,
                      cT=1.73e3,
@@ -434,6 +438,11 @@ class Sheet(object):
     @property
     def qTd(self):
         return self.d * 2*self.SC.D0 / (const.hbar*1e12/const.e * self.SC.cT)
+
+    @property
+    def Rbar(self):
+        '''Recombination constant, renormalized for phonon trapping in µm^3/µs'''
+        return self.SC.R / self.phtrf
     
     def qLkbTd(self, kbT):
         return self.d * kbT / (const.hbar*1e12/const.e * self.SC.cL)
@@ -458,6 +467,8 @@ class Sheet(object):
             Chipnum, KIDnum, self, reterr=True, **kwargs)
         self.tesc = tesc
         self.tescerr = tescerr
+
+    
 
 class Wire(Sheet):
     '''A superconducting wire with thickness d and width w'''

@@ -9,7 +9,6 @@ import scipy.constants as const
 
 import SC as SuperCond
 from kidata import io
-from kidata.plot import selectPread
 from kidata.noise import analysis
 from kidata.IQ import to_ampphase
 
@@ -77,7 +76,7 @@ def PSDs(chip, KIDs=None, pltPreads='all', Tminmax=(None, None), specinds=[0, 1,
         KIDs = np.unique(KIDPrT[:, 0])
     
     for KID in KIDs:
-        Preads = selectPread(pltPreads, np.unique(KIDPrT[KIDPrT[:, 0] == KID, 1]))
+        Preads = io.selectPread(pltPreads, np.unique(KIDPrT[KIDPrT[:, 0] == KID, 1]))
         for Pread in Preads:
             Temps = KIDPrT[(KIDPrT[:, 0] == KID) & (KIDPrT[:, 1] == Pread), 2]
             if Tminmax != (None, None):
@@ -117,7 +116,7 @@ def fits(chip, KIDs=None, pltPreads='all', Tminmax=(None, None), relerrthrs=.2):
         KIDs = np.unique(KIDPr[:, 0])
     
     for KID in KIDs:
-        Preads = selectPread(pltPreads, np.unique(KIDPr[KIDPr[:, 0] == KID, 1]))
+        Preads = io.selectPread(pltPreads, np.unique(KIDPr[KIDPr[:, 0] == KID, 1]))
         fig, axs = fig, axs = plt.subplots(2, 3,
                 figsize=(12, 4),
                 sharex=True,

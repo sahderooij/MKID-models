@@ -13,7 +13,7 @@ from scipy.optimize import root_scalar
 import warnings
 from multiprocess import Pool
 
-import SCtheory.tau, SCtheory.noise, SCtheory.Usadel
+import SCtheory.tau, SCtheory.noise, SCtheory.Usadel, SCtheory.qpredistr
 
 def f(E, kbT):
     """The Fermi-Dirac distribution."""

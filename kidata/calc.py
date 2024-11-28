@@ -13,7 +13,6 @@ import SCtheory as SCth
 import SC as SuperCond
 
 from kidata import io, noise
-from kidata.plot import selectPread
 
 
 # NOTE: all units are in 'micro': µeV, µm, µs etc.
@@ -301,8 +300,9 @@ def NLcomp(Chipnum, KIDnum, Pread, SCvol=None, method="", var="cross"):
         lvlcompspl = interpolate.splrep(np.linspace(0.01, 10, 10), np.ones(10))
     return lvlcompspl
 
-def Nqp(chip, KID, Pread, spec='cross'):
-    '''Calculates the Nqp vs T (in mK) from GR noise and S21 data'''
+def Nqp(chip, KID, Pread, spec='cross', use_MWgenvar=False):
+    '''Calculates the Nqp vs T (in mK) from GR noise and S21 data.
+    If use_MWgenvar is True, it calculates Nqp via the variance from Fischer&Catelani2024.'''
     specdict = {'amp': 0, 'phase': 1, 'cross': 2}
     fits = io.get_noisefits(chip, KID, Pread)
     tau, tauerr, lvl, lvlerr = fits[:, (specdict[spec] * 4 + 1):(specdict[spec] * 4 + 5)].T
@@ -335,7 +335,7 @@ def tesc(
 
     KIDPrT = io.get_noiseKIDPrT(Chipnum)
     Preads = KIDPrT[KIDPrT[:, 0] == KIDnum, 1]
-    Pread = selectPread(usePread, Preads)[0]
+    Pread = io.selectPread(usePread, Preads)[0]
     if SCvol is None:
         S21data = io.get_S21data(Chipnum, KIDnum)
         SCvol = SuperCond.init_SC(Chipnum, KIDnum, set_tesc=False)

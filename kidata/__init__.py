@@ -7,4 +7,4 @@ noise -- postprocesses noise files, and calculates PSDs.
 plot -- visualizes the (calculated) data.
 S21 -- Fits the resonator dips to get F0 and Q-factors.'''
 
-from . import calc, io, noise, IQ
+from . import calc, io, noise, IQ, plot, pulse

@@ -2,7 +2,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib
 
-from kidata.plot import selectPread
 from kidata import io
 
 
@@ -11,7 +10,7 @@ def fit_res(chip, KID, wvl, pltPreads='all', Tminmax=(None, None), relerrthrs=1)
     '<chip>/Pulse/<wvl>nm/fits'.
     The relative error thershold (relerrthrs) is defined as tsserr/tss of
     the phase, and only points with tsserr/tss less then relerrthrs are plotted.'''
-    Preads = selectPread(pltPreads, io.get_pulsePread(chip, KID, wvl))
+    Preads = io.selectPread(pltPreads, io.get_pulsePread(chip, KID, wvl))
     fig, axs = plt.subplots(4, 2,
             figsize=(8, 8),
             sharex=True,

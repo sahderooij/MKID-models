@@ -30,7 +30,7 @@ def calc_pulseavg_par(
 
     if minmax_proms is None:
         minmax_proms = select_proms(
-            filelocation, KIDPrT, pulse_len, numpulses, coord)
+            filelocation, KIDPrT, pulse_len, numpulses, coord, phasemax)
         
     with Pool() as p:
         for dummy in tqdm(p.imap(lambda file: 
@@ -118,7 +118,11 @@ def calc_pulseavg(
                     if coord == 'ampphase':
                         amp, phase = to_ampphase(data)
                     elif coord == 'RX':
-                        amp, phase = to_RX(data)
+                        infodata = io.read_dat(data_info)
+                        Qs = infodata['Header'][3].split('S21min')[0].split(',')
+                        Qc = float(Qs[1].split('=')[1])
+                        Q = float(Qs[0].split('=')[1])
+                        amp, phase = to_RX(data, Q/(2*Qc))
                     std = np.std(phase)
                     min_dist = 1.5 * pulse_len
 
@@ -222,14 +226,21 @@ def select_proms(filelocation, KIDPrT=None, pulse_len=2e3, numpulses=100, coord=
                 totpulses = 0
                 while totpulses < numpulses:
                     data = io.get_bin(filelocation, KID, Pread, temp, j)
+                    data_info = (f"{filelocation}/KID{KID}_{Pread}dBm"
+                                 f"__TDvis{j}_TmK{temp}_info.dat")
                     j += 1
                     if coord == 'ampphase':
                         amp, phase = to_ampphase(data)
                     elif coord == 'RX':
-                        amp, phase = to_RX(data)
+                        infodata = io.read_dat(data_info)
+                        Qs = infodata['Header'][3].split('S21min')[0].split(',')
+                        Qc = float(Qs[1].split('=')[1])
+                        Q = float(Qs[0].split('=')[1])
+                        amp, phase = to_RX(data, Q/(2*Qc))
+                    noisestd_est = np.abs(np.diff(np.percentile(phase, [1e-7, 50]))[0])
                     peaks, peakheight = find_peaks(
-                        phase, prominence=(np.abs(2*phase.min()), 
-                                           np.abs(phase.min()) + phasemax))
+                        phase, prominence=(2*noisestd_est, 
+                                           noisestd_est + phasemax))
                     prominences = peakheight["prominences"]
                     if len(peaks) >= 1:
                         totpulses += len(peaks)
@@ -241,17 +252,17 @@ def select_proms(filelocation, KIDPrT=None, pulse_len=2e3, numpulses=100, coord=
                     
                 mu, sigma = norm.fit(total_prominences)
 
-                plt.figure()
-                plt.plot(phase)
-                plt.plot(peaks, phase[peaks], 'r.')
-                plt.title(f"KID{KID}, {temp} mK, {Pread} dBm")
-                plt.figure()
+                fig, axs = plt.subplots(1, 2, figsize=(8, 3))
+                axs[0].plot(phase)
+                axs[0].plot(peaks, phase[peaks], 'r.')
+                axs[0].set_title(f"KID{KID}, {temp} mK, {Pread} dBm")
                 n, bins, patches = plt.hist(total_prominences, bins=30, density=True)
                 y = norm.pdf(bins, mu, sigma)
-                plt.plot(bins, y, 'r--', label=(f'Gaussian fit\n $\\mu$={mu:.2f}\n'
+                axs[1].plot(bins, y, 'r--', label=(f'Gaussian fit\n $\\mu$={mu:.2f}\n'
                          +f'$\\sigma$={sigma:.3f}\n R={(mu/(sigma * 2*np.sqrt(2*np.log(2)))):.1f}'))
-                plt.title("Histogram of found peaks")
-                plt.legend()
+                axs[1].set_title("Histogram of found peaks")
+                axs[1].set_xlabel('Prominence')
+                axs[1].legend()
                 plt.show()
                 minp = float(input(f"Lower bound (enter for {(mu - 2*sigma):.3f})") or mu - 2*sigma)
                 maxp = float(input(f"Upper bound (enter for {(mu + 2*sigma):.3f})") or mu + 2*sigma)
@@ -305,7 +316,7 @@ def findpeaks(
     # here we check if we missed any little hits that weren't caught before
 
     peaks, locations, prominences, amount = checkdoublepeak(
-        peaks, locations, prominences, amount, tres
+        peaks, locations, prominences, amount
     )
 
     peaks, locations, prominences, amount = calc_offset(
@@ -329,7 +340,7 @@ def get_amp(amp, locations, pulse_len, start, coord):
             ),
             0,
         )
-        all_peaks[i, :] -= np.average(all_peaks[i, 0: (start - 50)])
+        all_peaks[i, :] -= np.average(all_peaks[i, 0:(start - 50)])
         if coord == 'ampphase':
             all_peaks[i, :] += 1
     return all_peaks
@@ -462,7 +473,7 @@ def calctres(info_loc):
 
 
 def view_pulses(Chipnum, KID, Pread, wvl, T, coord='ampphase', pulse_len=500, start=100,
-                logscale=True, movavg=False, wnd=9, suboff=False):
+                logscale=True, movavg=False, wnd=9, suboff=False, ymin=1e-3):
     strms, locs, proms = io.get_pulseavginfo(Chipnum, KID, Pread, wvl, T, coord=coord)
     plt.ion()
 
@@ -483,7 +494,11 @@ def view_pulses(Chipnum, KID, Pread, wvl, T, coord='ampphase', pulse_len=500, st
             phpulse = phase[int(loc-start):int(loc+pulse_len-start)]
             amppulse = 1-amp[int(loc-start):int(loc+pulse_len-start)]
         elif coord == 'RX':
-            R, X = to_RX(data)
+            infodata = io.read_dat(data_info)
+            Qs = infodata['Header'][3].split('S21min')[0].split(',')
+            Qc = float(Qs[1].split('=')[1])
+            Q = float(Qs[0].split('=')[1])
+            amp, phase = to_RX(data, Q/(2*Qc))
             phpulse = X[int(loc-start):int(loc+pulse_len-start)]
             amppulse = R[int(loc-start):int(loc+pulse_len-start)]
         else:
@@ -498,6 +513,7 @@ def view_pulses(Chipnum, KID, Pread, wvl, T, coord='ampphase', pulse_len=500, st
         plt.plot(t, phpulse, label='phase' if coord == 'ampphase' else 'X')
         plt.plot(t, amppulse, label='1-amp' if coord == 'ampphase' else 'R')
         plt.legend()
+        plt.ylim(ymin, None)
         if logscale:
             plt.yscale('log')
         plt.show()

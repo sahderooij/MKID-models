@@ -64,11 +64,11 @@ def read_dat(path):
         while linenr <= nroflines:
             line = file.readline().replace('\n', '')
             linenr += 1
-            if "Temperature in K" in line:
-                Temp = float(line.replace('Temperature in K:', ''))
+            if "Temperature" in line:
+                Temp = float(line.split(':')[-1])
                 nextline = file.readline()
                 linenr += 1
-                while not nextline[0].isdigit() and nextline[0] != '-':
+                while not any(char.isdigit() for char in nextline):
                     nextline = file.readline()
                     linenr += 1
                 datdata['Data'][Temp] = np.fromstring(nextline, sep='\t')
@@ -346,3 +346,37 @@ def get_Pintdict(Chipnum):
             Pintdict[KIDnum].append(
                 10*np.log10(10**(-1*Pread/10)*Q**2/Qc/np.pi))
     return Pintdict
+
+
+def selectPread(pltPread, Preadar):
+    """Function that returns a Pread array, depending on the input pltPread."""
+    if type(pltPread) is str:
+        if pltPread == "min":
+            Pread = np.array([Preadar.max()])
+        elif pltPread == "med":
+            Pread = np.array([Preadar[np.abs(Preadar.mean() - Preadar).argmin()]])
+        elif pltPread == "max":
+            Pread = np.array([Preadar.min()])
+        elif pltPread == "minmax":
+            Pread = np.array([Preadar.max(), Preadar.min()])
+        elif pltPread == "minmedmax":
+            Pread = np.array(
+                [
+                    Preadar.max(),
+                    Preadar[np.abs(Preadar.mean() - Preadar).argmin()],
+                    Preadar.min(),
+                ]
+            )
+        elif pltPread == "all":
+            Pread = Preadar[::-1]
+        else:
+            raise ValueError("{} is not a valid Pread selection".format(pltPread))
+    elif type(pltPread) == list:
+        Pread = np.array(pltPread)
+    elif type(pltPread) == int:
+        Pread = np.array([np.sort(Preadar)[pltPread]])
+    elif type(pltPread) == np.ndarray:
+        Pread = pltPread
+    else:
+        raise ValueError("{} is not a valid Pread selection".format(pltPread))
+    return Pread

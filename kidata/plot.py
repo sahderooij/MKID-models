@@ -14,40 +14,6 @@ from kidata import noise
 import SCtheory as SCth
 
 
-def selectPread(pltPread, Preadar):
-    """Function that returns a Pread array, depending on the input pltPread."""
-    if type(pltPread) is str:
-        if pltPread == "min":
-            Pread = np.array([Preadar.max()])
-        elif pltPread == "med":
-            Pread = np.array([Preadar[np.abs(Preadar.mean() - Preadar).argmin()]])
-        elif pltPread == "max":
-            Pread = np.array([Preadar.min()])
-        elif pltPread == "minmax":
-            Pread = np.array([Preadar.max(), Preadar.min()])
-        elif pltPread == "minmedmax":
-            Pread = np.array(
-                [
-                    Preadar.max(),
-                    Preadar[np.abs(Preadar.mean() - Preadar).argmin()],
-                    Preadar.min(),
-                ]
-            )
-        elif pltPread == "all":
-            Pread = Preadar[::-1]
-        else:
-            raise ValueError("{} is not a valid Pread selection".format(pltPread))
-    elif type(pltPread) == list:
-        Pread = np.array(pltPread)
-    elif type(pltPread) == int:
-        Pread = np.array([np.sort(Preadar)[pltPread]])
-    elif type(pltPread) == np.ndarray:
-        Pread = pltPread
-    else:
-        raise ValueError("{} is not a valid Pread selection".format(pltPread))
-    return Pread
-
-
 def Nqp(
     chip,
     KIDs=None,
@@ -75,7 +41,7 @@ def Nqp(
         fig, ax = plt.subplots()
         fig.suptitle(f'{chip}, KID{KID}')
         Preads = np.unique(KIDPrT[KIDPrT[:, 0] == KID, 1])
-        Preadar = selectPread(pltPread, Preads)
+        Preadar = io.selectPread(pltPread, Preads)
 
         cmap = matplotlib.cm.get_cmap("plasma")
         norm = matplotlib.colors.Normalize(-1*Preadar.max(), -1*Preadar.min())
@@ -169,7 +135,7 @@ def Qif0(
     else:
         axs = ax12
 
-    Preadar = selectPread(pltPread, io.get_S21Pread(Chipnum, KIDnum))
+    Preadar = io.selectPread(pltPread, io.get_S21Pread(Chipnum, KIDnum))
     if color == "Pread":
         cmap = matplotlib.cm.get_cmap("plasma")
         norm = matplotlib.colors.Normalize(-1.05 * Preadar.max(), -0.95 * Preadar.min())
