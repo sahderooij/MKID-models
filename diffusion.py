@@ -13,23 +13,42 @@ import SCtheory as SCth
 # everything in um, us, K and eV  and combinations of them unless stated differently
 class model_par:
 
-    def __init__(self, SCvol, Teff, L, K=None):
+    def __init__(self,
+                 SCvol,
+                 Teff,
+                 L,
+                 Lmax=None,
+                 K=None,
+                 B=None,
+                 S=None,
+                 D=None):
         self.SCvol = SCvol
         self.Teff = Teff  # K
         self.L = L  # µs^-1
+        self.Lmax = Lmax
+        self.D = SCvol.SC.D
         if K is None:
             self.K = SCvol.Rbar / (SCvol.d * SCvol.w)  # µm/µs
         else:
             self.K = K
 
+        if B is None:
+            self.B = 1 / SCvol.SC.tpb
+        else:
+            self.B = B
+
+        if S is None:
+            self.S = 1 / SCvol.tesc
+        else:
+            self.S = S
+
 
 class IC_par:
 
-    def __init__(self, lmbd=0.402, eta_pb=0.59, sigma=10, trickle_time=False):
+    def __init__(self, lmbd=0.402, eta_pb=0.59, sigma=10):
         self.lmbd = lmbd  # µm
         self.eta_pb = eta_pb
         self.sigma = sigma  # µm
-        self.trickle_time = trickle_time  # µs
 
 
 defaultIC_par = IC_par()
@@ -40,7 +59,6 @@ class settings:
     def __init__(
         self,
         D_const=False,
-        approx2D=False,
         usesymm=True,
         dt_init=0.001,
         dx_or_fraction=1 / 5,
@@ -49,11 +67,8 @@ class settings:
         dt_max=10,
         simtime_approx=100,
     ):
-        """2D option is sketchy, don't trust without more checking.
-        If loading after a sim is too slow or requires too much space, increase ringingdtinterp.
-        """
+
         self.D_const = D_const  # Bool
-        self.approx2D = approx2D  # Bool
         self.usesymm = usesymm  # Bool
         self.dt_init = dt_init  # µs
         self.dx_or_fraction = dx_or_fraction  # µm or (-)
@@ -85,7 +100,7 @@ class sim:
         self.length = self.model_par.SCvol.l
         # SC properties
         self.Delta = self.model_par.SCvol.SC.D0 * 1e-6  # eV, gap energy
-        self.D0 = self.model_par.SCvol.SC.D  # µm^2/µs, diffusion const.
+        self.D0 = self.model_par.D  # µm^2/µs, diffusion const.
         self.N0 = self.model_par.SCvol.SC.N0 * 1e6  # eV^-1 µm^-3
         # Quasiparticle equilibrium rates
         self.Q0 = (SCth.nqp(
@@ -94,14 +109,17 @@ class sim:
             self.model_par.SCvol.SC,
         ) * self.width * self.height)
         self.L = self.model_par.L
-        self.K = self.model_par.K  # previous: self.L / (2 * self.Q0)
+        self.K = self.model_par.K
+        self.B = self.model_par.B
+        self.S = self.model_par.S
+
         # Quasiparticle non-equilibirium
         self.E_ph = consts.h / consts.e * 1e6 * consts.c / self.IC_par.lmbd  # eV
         self.Nqp_init = self.IC_par.eta_pb * self.E_ph / self.Delta
 
         # Initialize time axis and dt
         dt = self.settings.dt_init
-        self.t_axis = [0]
+        self.t_axis = np.zeros(1)
         self.dtlist = [self.settings.dt_init]
 
         # set geometry
@@ -119,36 +137,33 @@ class sim:
             valid_dx_list = self.length / np.arange(1, maxdiv + 0.5)[::-1]
         # update dx to valid value close to the one set before
         dx = valid_dx_list[0]
-        self.dxlist = [
-            dx
-        ]  # store dx in new output list which will contain dx at each timestep
+        # store dx in new output list which will contain dx at each timestep
+        self.dxlist = [dx]
 
         self.set_geometry(dx)  # calculate self.x_centers and self.x_borders
         # store x_centers in new output list
         self.x_centers_list = [self.x_centers]
 
         # initialize state variables
-        if self.IC_par.trickle_time:  # if using forcing term instead of simple IC
-            self.Qintime = [np.zeros_like(self.x_centers)]  # set IC to zero
-        else:
-            self.Qintime = [
-                np.exp(-0.5 * (self.x_centers / self.IC_par.sigma)**2) *
-                self.Nqp_init / (self.IC_par.sigma * np.sqrt(2 * np.pi))
-            ]  # set IC to Nqp_init
-            self.Qintime[0] = (
-                self.Qintime[0] * self.Nqp_init /
-                self.integrate(self.Qintime[0], dx)
-            )  # correct total Nqp if boundary clips off tails due to large sigma
 
-        self.Nqpintime = [self.integrate(self.Qintime[0], dx)
-                         ]  # calculate integral of density, store in new list
+        # set IC to Nqp_init
+        self.Qintime = [
+            np.exp(-0.5 * (self.x_centers / self.IC_par.sigma)**2) *
+            self.Nqp_init / (self.IC_par.sigma * np.sqrt(2 * np.pi))
+        ]
+
+        # correct total Nqp if boundary clips off tails due to large sigma
+        self.Qintime[0] *= self.Nqp_init / self.integrate(self.Qintime[0], dx)
+
+        self.Nqpintime = np.array([self.integrate(self.Qintime[0], dx)])
+
+        # intialize phonons as 0
+        self.Wintime = [np.zeros(len(self.x_centers))]
+        self.Nwintime = np.array([self.integrate(self.Wintime[0], dx)])
 
         # calc thermal density of quasiparticles
-        Teff_thermal = self.nqp_to_T(
-            self.Q0)  # calculate effective temperature at each volume
-        Dfinal = self.D0 * np.sqrt(
-            2 * consts.Boltzmann / consts.e * Teff_thermal /
-            (np.pi * self.Delta))  # calculate D array for steady state
+        kBTeff_thermal = self.nqp_to_kBT(self.Q0)
+        Dfinal = self.D0 * np.sqrt(2 * kBTeff_thermal / (np.pi * self.Delta))
 
         # run simulation
         i = 0  # keeps track of simulation step
@@ -157,84 +172,72 @@ class sim:
             0  # keeps track of elapsed time but specifically for adapting dx with time
         )
         sqrtMSD2D = self.IC_par.sigma
-        if (self.IC_par.trickle_time
-           ):  # pause adaptive dx as long as the forcing term is still large
-            dxAdaptPause = True
-        else:
-            dxAdaptPause = False
 
-        while True:  # kind of a do-while loop
-            if (
-                    self.t_elapsed > 3 * self.IC_par.trickle_time
-            ) and dxAdaptPause:  # the integral from 0 to 3*tau already contains >95% of the surface under the exponential.
-                dxAdaptPause = False  # resume the adaptive dx optimization
-
-            # handle adaptive dx
+        while True:
+            # adaptive dx
             if (self.settings.adaptivedx and (i != 0) and
-                (dx != valid_dx_list[-1]) and (dxAdaptPause == False)):
+                (dx != valid_dx_list[-1])):
                 sqrtMSD = (
                     np.sqrt(2 * Dfinal * t_elapsed_D) + self.IC_par.sigma
-                )  # mean squared distance expected from diffusion only (after forcing is negligible)
+                )  # mean squared distance expected from diffusion only
                 dx = valid_dx_list[
                     valid_dx_list <= sqrtMSD * self.settings.dx_or_fraction][
                         -1]  # update to the largest allowed dx value below the requested fraction of mean distance
-                self.set_geometry(dx)  # calculate new geometry of simulation
-                Qprev = np.interp(self.x_centers, x_centersprev, self.Qintime[i]
-                                 )  # update the qp distribution to new geometry
-                Qprev *= self.integrate(
-                    self.Qintime[i], self.dxlist[i]
-                ) / self.integrate(
-                    Qprev, dx
-                )  # correct for any potential loss of total Nqp by normalizing
-                t_elapsed_D += dt  # update elapsed diffusion time
+                self.set_geometry(dx)
+
+                # update distributions to new geometry
+                Qprev = np.interp(self.x_centers, x_centersprev,
+                                  self.Qintime[i])
+                Wprev = np.interp(self.x_centers, x_centersprev,
+                                  self.Qintime[i])
+
+                #correct for any potential loss of total Nqp, Nw
+                Qprev *= self.integrate(self.Qintime[i],
+                                        self.dxlist[i]) / self.integrate(
+                                            Qprev, dx)
+                Wprev *= self.integrate(self.Wintime[i],
+                                        self.dxlist[i]) / self.integrate(
+                                            Wprev, dx)
+
+                # update elasped diffusion time
+                t_elapsed_D += dt
+
             else:
                 Qprev = self.Qintime[i]
-
-            # update diffusion
-            if self.settings.D_const:
-                D = self.D0
-            else:  # calculate local effective temperature
-                Teff_x = self.nqp_to_T(Qprev + self.Q0)
-                D = self.calc_D(
-                    Teff_x)  # calculate new location dependent diffusion
-            # 2D approximation
-            sqrtMSD2D += 4 * self.D0 * dt
-            if self.settings.approx2D and (sqrtMSD2D < self.width / 2):
-                D = (
-                    8 * D**2 * (self.t_elapsed + dt)
-                )  # use higher diffusion rate to simulate 2D diffusion if required
+                Wprev = self.Wintime[i]
 
             # do simulation step
             self.dxlist.append(dx)
             self.dtlist.append(dt)
-            self.Qintime.append(self.CN_step(dt, dx, D, Qprev))
-            self.Nqpintime.append(self.integrate(self.Qintime[i + 1], dx))
+            Q, W = self.CN_step(dt, dx, Qprev, Wprev)
+            self.Qintime.append(Q)
+            self.Wintime.append(W)
+            self.Nqpintime = np.append(self.Nqpintime,
+                                       self.integrate(self.Qintime[i + 1], dx))
+            self.Nwintime = np.append(self.Nwintime,
+                                      self.integrate(self.Wintime[i + 1], dx))
             self.x_centers_list.append(self.x_centers)
 
             x_centersprev = self.x_centers
             self.t_elapsed += dt
-            self.t_axis.append(self.t_elapsed)
-            print(f"\rIteration: {i}\tSimtime (us): {self.t_elapsed}",
-                  end="")  # print and update progress counter
+            self.t_axis = np.append(self.t_axis, self.t_elapsed)
 
-            if (self.t_elapsed > self.settings.simtime_approx
-               ):  # check whether simulation has reached required time
+            print(f"\rIteration: {i}\tSimtime (us): {self.t_elapsed}", end="")
+
+            if (self.t_elapsed > self.settings.simtime_approx):
                 break
 
             # handle adaptive dt
-            if self.settings.adaptivedt and (dt <= self.settings.dt_max):
-                dN = np.abs(self.Nqpintime[i] - self.Nqpintime[i + 1]
-                           )  # calculate difference in Nqp from previous step.
+            if self.settings.adaptivedt:
+                dN = np.abs(self.Nqpintime[i] - self.Nqpintime[i + 1])
+                dNw = np.abs(self.Nwintime[i] - self.Nwintime[i + 1])
                 if i == 0:
                     dNdt = dN * dt  # set at beginning of simulation
-                if dN != 0:
-                    dt = (
-                        dNdt / dN + dt
-                    ) / 2  # update dt, taking the mean stabilizes oscillations due to trickle and adaptive dt both depending on dt value.
+                    dNwdt = dNw * dt
+                dt = np.min([(dNdt / dN + dt) / 2, (dNwdt / dNw + dt) / 2])
+                if dt > self.settings.dt_max:
+                    dt = self.settings.dt_max
             i += 1
-
-        self.t_axis = np.array(self.t_axis)  # save time array
-        self.Nqpintime = np.array(self.Nqpintime)  # and data array
 
     def set_geometry(self, dx):
         if self.settings.usesymm:  # set geometry for half the MKID
@@ -247,73 +250,76 @@ class sim:
                                        self.length / 2, dx)
         return
 
-    def nqp_to_T(self, nqp):  # inverts n_qp(T)
-        a = (2 * self.N0 * self.height * self.width *
-             np.sqrt(2 * np.pi * consts.Boltzmann / consts.e * self.Delta))
-        b = self.Delta / (consts.Boltzmann / consts.e)
-        return np.real(2 * b / lambertw(2 * a**2 * b / (nqp**2)))
+    def nqp_to_kBT(self, nqp):  # inverts n_qp(T)
+        xqp = nqp / (2 * self.N0 * self.height * self.width * self.Delta)
+        return np.real(2 * self.Delta / lambertw(4 * np.pi / xqp**2))
 
-    def calc_D(self, Teff_x):
+    def calc_D(self, kBTeff_x):
         '''calculates energy dependent D at elements, interpolates to borders'''
         return np.interp(
             self.x_borders,
             self.x_centers,
-            self.D0 * np.sqrt(2 * consts.Boltzmann / consts.e * Teff_x /
-                              (np.pi * self.Delta)),
+            self.D0 * np.sqrt(2 * kBTeff_x / (np.pi * self.Delta)),
         )
 
-    def diffuse(self, dx, D, Q_prev):
-        '''apply diffusion'''
-        Q_temp = np.pad(
-            Q_prev, (1, 1), "edge"
-        )  # Assumes von Neumann BCs, for Dirichlet use np.pad(Q_prev,(1,1),'constant', constant_values=(0, 0)), disable 'usesymmetry' for this
+    def diffuse(self, dx, D, Q):
+        '''apply diffusion.
+        Assumes von Neumann BCs, for Dirichlet use 
+        np.pad(Q_prev,(1,1),'constant', 
+        constant_values=(0, 0)), disable 'usesymmetry' for this'''
+        Q_temp = np.pad(Q, (1, 1), "edge")
         gradient = D * np.diff(Q_temp) / dx
         return (-gradient[:-1] + gradient[1:]) / dx
 
-    def source(self, dt, dx):  # apply quadratically decaying source term
-        S_next = np.exp(-0.5 * (self.x_centers / self.IC_par.sigma)**2) / (
-            self.IC_par.sigma * np.sqrt(2 * np.pi))
-        S_prev = ((self.Nqp_init / self.IC_par.trickle_time) *
-                  np.exp(-(self.t_elapsed) / self.IC_par.trickle_time) *
-                  np.exp(-0.5 * (self.x_centers / self.IC_par.sigma)**2) /
-                  (self.IC_par.sigma * np.sqrt(2 * np.pi)))
-        integ_next = self.integrate(S_next, dx)
-        integ_prev = self.integrate(S_prev, dx)
-        if (integ_next > 1e-6) and (integ_prev > 1e-6):
-            S_next = (
-                S_next * (self.Nqp_init / self.IC_par.trickle_time) *
-                np.exp(-(self.t_elapsed + dt) / self.IC_par.trickle_time) /
-                integ_next)
-            S_prev = (S_prev * (self.Nqp_init / self.IC_par.trickle_time) *
-                      np.exp(-(self.t_elapsed) / self.IC_par.trickle_time) /
-                      integ_prev)
-        return S_next, S_prev
-
-    def CN_eqs_source(self, dt, dx, D, Q_prev, Q_next):
-        '''the Crank-Nicolson update equations in case of a source term'''
-        S_next, S_prev = self.source(dt, dx)
-        return (Q_prev - Q_next + 0.5 * dt *
-                (self.diffuse(dx, D, Q_next) - self.K * Q_next**2 -
-                 self.L * Q_next + S_next + self.diffuse(dx, D, Q_prev) -
-                 self.K * Q_prev**2 - self.L * Q_prev + S_prev))
-
-    def CN_eqs(self, dt, dx, D, Q_prev, Q_next):
+    def CN_eqs(self, dt, dx, Q_prev, W_prev, QW_next):
         '''the Crank-Nicolson update equations without source term'''
-        return (Q_prev - Q_next + 0.5 * dt *
-                (self.diffuse(dx, D, Q_next) - self.K * Q_next**2 -
-                 self.L * Q_next + self.diffuse(dx, D, Q_prev) -
-                 self.K * Q_prev**2 - self.L * Q_prev))
+        Q_next = QW_next[:len(Q_prev)]
+        W_next = QW_next[-len(W_prev):]
 
-    def CN_step(self, dt, dx, D, Q_prev):
-        '''fsolve the CN equations, with the previous step/2 as initial guess'''
-        if self.IC_par.trickle_time:  # if we have a source term:
-            return fsolve(
-                lambda Q_next: self.CN_eqs_source(dt, dx, D, Q_prev, Q_next),
-                Q_prev / 2,
-            )
+        kBTeff_x = self.nqp_to_kBT(Q_prev + self.Q0)
+        if self.settings.D_const:
+            D = self.D0
         else:
-            return fsolve(lambda Q_next: self.CN_eqs(dt, dx, D, Q_prev, Q_next),
-                          Q_prev / 2)
+            D = self.calc_D(kBTeff_x)
+
+        if self.L == 't_eph':
+            L = np.min(
+                np.array([
+                    np.ones(len(kBTeff_x)) * self.model_par.Lmax,
+                    self.model_par.SCvol.phtrf / SCth.tau.scat_eph_2D_disorder(
+                        kBTeff_x * 1e6, self.model_par.SCvol)
+                ]), 0)
+        else:
+            L = self.L
+
+        return np.append(
+            (Q_prev - Q_next + 0.5 * dt *
+             (self.diffuse(dx, D, Q_next) - self.K * Q_next**2 - L * Q_next +
+              2 * self.B * W_next + self.diffuse(dx, D, Q_prev) -
+              self.K * Q_prev**2 - L * Q_prev + 2 * self.B * W_prev))**2,
+            (W_prev - W_next + 0.5 * dt *
+             (L / 2 * Q_next + self.K / 2 * Q_next**2 -
+              (self.B + self.S) * W_next + L / 2 * Q_prev +
+              self.K / 2 * Q_prev**2 - (self.B + self.S) * W_prev))**2)
+
+    def CN_step(self, dt, dx, Q_prev, W_prev):
+        '''fsolve the CN equations, with the previous step as initial guess'''
+
+        kBTeff_x = self.nqp_to_kBT(Q_prev + self.Q0)
+        if self.L == 't_eph':
+            L = np.min(
+                np.array([
+                    np.ones(len(kBTeff_x)) * self.model_par.Lmax,
+                    self.model_par.SCvol.phtrf / SCth.tau.scat_eph_2D_disorder(
+                        kBTeff_x * 1e6, self.model_par.SCvol)
+                ]), 0)
+        else:
+            L = self.L
+        Wguess = (L - self.K * Q_prev) * Q_prev
+        QW_next = fsolve(
+            lambda QW_next: self.CN_eqs(dt, dx, Q_prev, W_prev, QW_next),
+            np.append(Q_prev, Wguess))
+        return QW_next[:len(Q_prev)], QW_next[-len(W_prev):]
 
     def integrate(self, Q, dx):
         '''integrate nqp to find Nqp'''
