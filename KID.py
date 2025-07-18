@@ -1,4 +1,4 @@
-import kidcalc
+import SCtheory as kidcalc
 from kidata import calc, io
 
 import numpy as np
@@ -29,7 +29,7 @@ class KID(object):
         kbT0=0.2 * 86.17,
         kbT=0.2 * 86.17,
         ak=0.0268,
-        SCvol=SC.Vol(SC.Al(), .05, 15.),
+        SCvol=SC.Vol(SC.Al, .05, 15, 100),
     ):
         """Attributes are defined here. hw0 and kbT0 give the resonance frequency
         at temperature T0, both in µeV, from which we linearize to calculate the 
@@ -360,12 +360,13 @@ class KID(object):
         Nqpt = Nqpevol[:, 0]
         Nwt = Nqpevol[:, 1]
 
-        plt.plot(t, Nqpt - self.Nqp_0)
+        plt.plot(t, Nqpt - self.Nqp_0, label='Nqp')
         plt.yscale("log")
 
         if plot_lin:
             Nqptlin = self.calc_linNqpevol(Nqp_ini, tStop, tInc)
-            plt.plot(t, Nqptlin)
+            plt.plot(t, Nqptlin * (Nqpt[-1] - self.Nqp_0)/Nqptlin[-1],
+                    label='Nqplin')
 
         if fit_secondhalf:
             fit = curve_fit(
@@ -378,9 +379,14 @@ class KID(object):
             plt.plot(t, fit[0][1] * np.exp(-t / fit[0][0]))
 
         if plot_phonon:
-            plt.figure()
-            plt.plot(t, Nwt)
+            # plt.figure()
+            # plt.twinx()
+            plt.plot(t, (Nwt - Nwt[0])
+                     *(Nqpt[-1] - self.Nqp_0)
+                     /(Nwt[-1] - Nwt[0]), label='phonon')
             plt.yscale("log")
+        plt.legend()
+        plt.show()
 
     def plot_resp(self, hwrad, tStop=None, tInc=None, points=50, plot="all"):
 
@@ -474,7 +480,7 @@ class S21KID(KID):
         kbT0=0.2 * 86.17,
         kbT=0.2 * 86.17,
         ak=0.0268,
-        SCvol=SC.Vol(SC.Al(), .05, 15.),
+        SCvol=SC.Vol(SC.Al, .05, 15, 100),
     ):
         super().__init__(Qc, hw0, kbT0, kbT, ak, d, SCvol)
         self.Qispl = interpolate.splrep(

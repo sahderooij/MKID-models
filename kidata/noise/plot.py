@@ -109,6 +109,7 @@ def PSDs(chip, KIDs=None, pltPreads='all', Tminmax=(None, None), specinds=[0, 1,
                         matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axs[-1]
                     )
                 clb.ax.set_title("T (mK)")
+                plt.show()
             
 def fits(chip, KIDs=None, pltPreads='all', Tminmax=(None, None), relerrthrs=.2):
     KIDPr = np.unique(io.get_noiseKIDPrT(chip)[:-1], axis=0)

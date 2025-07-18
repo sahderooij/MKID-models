@@ -109,6 +109,8 @@ def view_bins(path, coordinates='ampphase', sel='',
         axs[1].plot(phase)
         axs[0].plot(amp, color="orange")
         axs[1].set_xlabel("time point")
+        axs[0].axhline(1, color='k', ls='--')
+        axs[1].axhline(0, color='k', ls='--')
         fig.suptitle(file)
 
     interact(

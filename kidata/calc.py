@@ -44,10 +44,11 @@ def ak(S21data, SC=None, plot=False, reterr=False, method="df_nonlin", Tmin=None
     hw = S21data[:, 5] * const.Planck / const.e * 1e6  # µeV
     kbT = S21data[:, 1] * const.Boltzmann / const.e * 1e6  # µeV
     Qi = S21data[:, 4]
-    
-    hw0 = hw[np.argmin(S21data[:, 1] - Tmin)]
-    kbT0 = kbT[np.argmin(S21data[:, 1] - Tmin)]
-    Qi0 = Qi[np.argmin(S21data[:, 1] - Tmin)]
+
+    Tminind = np.argmin(S21data[:, 1] - Tmin)
+    hw0 = hw[Tminind]
+    kbT0 = kbT[Tminind]
+    Qi0 = Qi[Tminind]
     
     # define y to fit:
     if method == "df":
@@ -57,20 +58,16 @@ def ak(S21data, SC=None, plot=False, reterr=False, method="df_nonlin", Tmin=None
     elif method == 'df_nonlin':
         y = (hw0/hw)**2 - 1
         
-    # define x to fit:
-    x = np.zeros(len(y))
-    s0 = SCth.cinduct(hw0, kbT0, SC)
-    Lk0 = s0[1]/((s0[0]**2 + s0[1]**2)*hw0*sheet.d) # thin film (d << pen.depth) limit
-    for i, kbTi in enumerate(kbT):
-        s = SCth.cinduct(hw[i], kbTi, SC)
-        beta = SCth.beta(kbTi, SCth.D(kbTi, SC), sheet)
-        Lk = s[1]/((s[0]**2 + s[1]**2)*hw[i]*sheet.d)
-        if method == "df":
-            x[i] = (s[1] - s0[1]) / s0[1] * beta / 4
-        elif method == "Qi":
-            x[i] = (s[0] - s0[0]) / s0[1] * beta / 2
-        elif method == 'df_nonlin':
-            x[i] = Lk/Lk0 - 1
+    s1, s2 = SCth.cinduct(hw[Tminind:], kbT[Tminind:], SC)
+    lambdaeff = 1/np.sqrt(hw*s2)
+    Lk = lambdaeff/np.tanh(sheet.d/lambdaeff)
+    beta = 2 # thin film limit
+    if method == "df":
+        x = (s2 - s2[0]) / s2[0] * beta / 4
+    elif method == "Qi":
+        x = (s1 - s1[0]) / s2[0] * beta / 2
+    elif method == 'df_nonlin':
+        x = Lk/Lk[0] - 1
             
     # Mask the double measured temperatures, and only fit from Tmin
     mask1 = np.zeros(len(kbT), dtype="bool")

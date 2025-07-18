@@ -89,6 +89,7 @@ def nonexp(
     tfit=None,
     reterr=False,
     plot=False,
+    tres=None,
 ):
     """Fits an equation of the form: 
         x(t) = A / ((1 + B)exp(t/tss) - 1),
@@ -124,7 +125,10 @@ def nonexp(
         tsstfit = (tsstfitmin, tsstfitmax)
     
     if tfit is None:
-        tfit = (0, tsstfit[1])
+        if tres is None:
+            tfit = (0, tsstfit[1])
+        else:
+            tfit = (-int(np.ceil(tres)), tsstfit[1])
 
     # first extract the steady state (tail) decay time
     tss, tsserr = (
@@ -138,9 +142,24 @@ def nonexp(
     t2 = t[fitmask]
     peak2 = pulse[fitmask]
 
+    if tres is not None:
+        def fitfunc(t, A, B, retmasked=True):
+            tfull = np.arange(len(pulse)) - pulsestart + int(np.ceil(tres))
+            tpulse = tfull[tfull>=0]
+            fullpulse = nonexp_func(tpulse, tss, A, B)
+            padded = np.pad(fullpulse, (len(tpulse), len(tpulse)), constant_values=(0, 0))
+            convring = np.exp(-tpulse/tres)
+            convring /= np.sum(convring)
+            fullconvpulse = np.convolve(padded, convring, 'valid')[:len(tpulse)]
+            return fullconvpulse[np.isin(tpulse - int(np.ceil(tres)), t)]
+    else:
+        def fitfunc(t, A, B):
+            return nonexp_func(t, tss, A, B)
+
+
     # now do the fit:
     try:
-        fit = curve_fit(lambda t, A, B: nonexp_func(t, tss, A, B),
+        fit = curve_fit(fitfunc,
                         t2, peak2, p0=(peak2[0], 1),
                        bounds=([0, 0], [np.inf, np.inf]))
         A, B = fit[0]
@@ -153,8 +172,8 @@ def nonexp(
         for ax in axs:
             ax.plot(t, pulse, '.', label='data')
             ax.axhline(np.std(pulse[:pulsestart])*1e-1, color='k', label='std/10')
-            ax.plot(t2, nonexp_func(t2, tss, A, B), 'r', label='1/t + exp. fit')
-            ax.plot(t[pulsestart:], nonexp_func(t[pulsestart:],tss, A, B),
+            ax.plot(t2, fitfunc(t2, A, B), 'r', label='1/t + exp. fit')
+            ax.plot(t[pulsestart:], fitfunc(t[pulsestart:], A, B, retmasked=False),
                  'r--')
             tssmask = (t > tsstfit[0]) & (t < tsstfit[1])
             ax.plot(t[tssmask], nonexp_func(t[tssmask], tss, A, B), 'r',
@@ -220,11 +239,20 @@ def nonexps(fld, coord='ampphase', **nonexpkwargs):
             fitres[t, 0] = TmKs[t]
             avgpulsedata = np.loadtxt(fld + '/' + '_'.join(KIDPrExs[k]) + f'_TmK{TmKs[t]}_avgpulse_{coord}.csv',
                                   delimiter=',', skiprows=1)
-            fitres[t, 1:7] = nonexp(1 - avgpulsedata[:, 0], **nonexpkwargs, reterr=True)
-            fitres[t, 7:16] = nonexp(avgpulsedata[:, 2], **nonexpkwargs, reterr=True)
+            if len(avgpulsedata.shape) == 1:
+                fitres[t] = np.ones(len(fitres[t])) * np.nan
+            else:
+                if coord=='ampphase':
+                    avgpulsedata[:, 0] = 1 - avgpulsedata[:, 0]                    
+                fitres[t, 1:7] = nonexp(avgpulsedata[:, 0], **nonexpkwargs, reterr=True)
+                fitres[t, 7:16] = nonexp(avgpulsedata[:, 2], **nonexpkwargs, reterr=True)
+
+                if nonexpkwargs['plot']:
+                    plt.suptitle(f'{KIDPrExs[k]}, {TmKs[t]} mK')
+                    plt.show()
 
         np.savetxt(resultpath + '/' + '_'.join(KIDPrExs[k]) + '.csv',
-                   fitres[fitres[:, 0].argsort(), :], delimiter=',', 
+                   fitres[fitres[:, 0].argsort(), :], delimiter=',',
                   header=('Temperature (mK), amp tss (µs), amp tss err (µs), amp A (arb.), amp A err (arb.), '
                           + 'amp B (arb.), amp B err (arb.), '
                           + 'phase tss (µs), phase tss err (µs), phase A (arb.), phase A err (arb.), '
@@ -247,12 +275,13 @@ def show(fld, pulsestart=100, coords='ampphase'):
         fitres = np.loadtxt(fld + '/fits/' + '_'.join(file.split('_')[:3]) + '.csv', 
                            delimiter=',', ndmin=2)
         TmK = int(file.split('_')[-3].split('.')[0][3:])
-        
+        if coords=='ampphase':
+            avgpulse[:, 0] = 1 - avgpulse[:, 0]
         for j in range(2):
             for i, (ax, coord) in enumerate(zip(axs[j, :], ['amp', 'phase'])):
                 ax.cla()
                 if i==0:
-                    ax.plot(t, 1 - avgpulse[:, 0], '.')
+                    ax.plot(t, avgpulse[:, 0], '.')
                 else:
                     ax.plot(t, avgpulse[:, 2], '.')
                         
@@ -267,9 +296,10 @@ def show(fld, pulsestart=100, coords='ampphase'):
                     ax.legend(loc=(0, 1), title=coord)
                 if j==1:
                     ax.set_ylim(1e-4, 2*avgpulse[:, 2].max())
-            axs[1, j].set_yscale('log')
             axs[1, j].set_xlabel('Time (1/fs)')
             axs[j, 0].set_ylabel('Response')
+
+        axs[1, 0].set_yscale('log')
         fig.suptitle(file)
         fig.tight_layout()
     
@@ -277,5 +307,5 @@ def show(fld, pulsestart=100, coords='ampphase'):
     fileids = np.unique(fileids[:, :4], axis=0)
     files = [(f'KID{fileids[i, 0]:.0f}_{fileids[i, 1]:.0f}dBm_' 
              + ('_' if fileids[i, 2]==0 else f'Tchip{fileids[i, 2]:.2f}_')
-             + f'TmK{fileids[i, 3]:.0f}_avgpulse_ampphase.csv') for i in range(len(fileids))]
+             + f'TmK{fileids[i, 3]:.0f}_avgpulse_{coords}.csv') for i in range(len(fileids))]
     interact(plotfit, file=files)

@@ -29,7 +29,7 @@ def get_datafld():
                 are the results of the average pulse calculation from 
                 kidata.pulse.calc_avgpulse().'''
 
-    datafld = "E:/"
+    datafld = "D:/"
     assert glob.glob(datafld), 'data folder not found'
     return datafld
 

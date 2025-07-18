@@ -6,6 +6,7 @@ import scipy.integrate as integrate
 from scipy.interpolate import splev, splrep
 import warnings
 from multiprocess import Pool
+from scipy.special import digamma
 
 
 class Usadel(object):
@@ -14,6 +15,14 @@ class Usadel(object):
         self.Delta = Delta
         self.alpha = alpha
 
+    @property
+    def Eg(self):
+        '''Gap energy'''
+        if self.alpha < self.Delta:
+            return (1-(self.alpha/self.Delta)**(2/3))**(3/2)*self.Delta
+        else: 
+            return 0
+    
     def eq(self, theta, E):
         return (self.Delta * np.cos(theta) 
             + 1j * E * np.sin(theta) 
@@ -26,15 +35,15 @@ class Usadel(object):
 
     def _solve(self, E):
         if E == 0:
-            x0 = 0
+            x0 = np.pi/2
         else:
-            x0 = np.arctan(self.Delta/np.abs(E)*np.sign(E).real)
+            x0 = np.arctan2(self.Eg, np.abs(E)*np.sign(E).real) #alpha=0 solution, with Delta->Eg
         result = root_scalar(self.eq, args=(E,), method='newton', x0=x0, fprime=self.dtheta)
 
         if not result.converged:
             warnings.warn(f'\nSolving Usadel eq. did not converge:\n' + 
                           f' flag={result.flag}\n' + 
-                          f'E={E}, Delta={self.Delta}, alpha={self.alpha}\n')
+                          f'E={E}, Delta={self.Delta:.2f}, alpha={self.alpha:.2f}, Eg={self.Eg:.2f}\n')
         return result.root
 
     def solve(self, E):
@@ -53,17 +62,18 @@ class selfcons(object):
         self.kbTc = SC.kbTc # meausured Tc
         self.kbTD = SC.kbTD
         self.alpha = alpha
-        self.set_kbTc0() # Tc if alpha was 0
-    
+        self.kbTc0 = self.kbTc * np.exp(
+            digamma(.5 + self.alpha/(2*np.pi*self.kbTc)) 
+            - digamma(.5)
+        ) # Tc for alpha=0
+        
     def eq(self, D, wn, kbT):
-        theta = np.zeros(len(wn))
         Ueq = Usadel(D, self.alpha)
-        for i, w in enumerate(wn):
-            th = Ueq.solve(1j*w)
-            if th.imag != 0:
+        th = Ueq.solve(1j*wn)
+        if any(th.imag != 0):
                 warnings.warn('\nComplex theta found in Delta consistency calculation:\n'
                              + f'theta_imag={th.imag}')
-            theta[i] = th.real
+        theta = th.real
         return D * np.log(self.kbTc0/kbT) - 2*np.pi*kbT * np.sum(D/wn - np.sin(theta))
 
     def _solve(self, kbT):
@@ -83,20 +93,6 @@ class selfcons(object):
                 D[i] = self._solve(kbTit)
             return D
 
-    def find_kbTc(self):
-        res = root_scalar(lambda kbT: self.solve(kbT) - self.kbTc0*1e-6,
-                           bracket=[self.kbTc0 - self.alpha, self.kbTc0], method='bisect', rtol=1e-3)
-        return res.root 
-
-    def set_kbTc0(self):
-        def var_kbTc0(kbTc0):
-            self.kbTc0 = kbTc0
-            return self.find_kbTc() - self.kbTc
-        res = root_scalar(var_kbTc0, bracket=[self.kbTc, self.kbTc + self.alpha], 
-                                 method='bisect', rtol=1e-4)
-        self.kbTc0 = res.root
-        return res
-
 class Nam(object):
     ''' Nam equations and solving them '''
     def __init__(self, SC, alpha):
@@ -104,69 +100,57 @@ class Nam(object):
         self.Usadel = Usadel(0, alpha)
         self.kbTD = SC.kbTD
 
-    def update_thetaspl(self, hw, D, nfine=1000, ncoarse=100):
-        Ear = np.append(np.linspace(-hw, 2 * D, nfine), 
-                        np.linspace(2 * D + (2 * D + self.kbTD)/ncoarse, self.kbTD, ncoarse))
-        self.Usadel.Delta = D
-        theta = self.Usadel.solve(Ear)
-        self.rethetaspl = splrep(Ear, theta.real)
-        self.imthetaspl = splrep(Ear, theta.imag)
-
     def g1(self, theta1, theta2):
-        return (np.cos(theta1).real * np.cos(theta2).real 
+        return np.abs(np.cos(theta1).real * np.cos(theta2).real 
                 + (-1j * np.sin(theta1)).real * (-1j * np.sin(theta2)).real)
     
     def g2(self, theta1, theta2):
-        return (- np.cos(theta1).imag * np.cos(theta2).real 
-                - (-1j * np.sin(theta1)).imag * (-1j * np.sin(theta2)).real)
+        return np.abs(np.cos(theta1).imag * np.cos(theta2).real 
+                + (-1j * np.sin(theta1)).imag * (-1j * np.sin(theta2)).real)
 
     def s1integrand1(self, E, hw, kbT):
-        theta1, theta2 = (splev([E, E+hw], self.rethetaspl, ext=1) 
-                          + 1j*splev([E, E + hw], self.imthetaspl, ext=1))
+        theta1 = self.Usadel.solve(E)
+        theta2 = self.Usadel.solve(E + hw)
         return 2/hw * self.g1(theta1, theta2) * (SCth.f(E, kbT) - SCth.f(E + hw, kbT))
 
     def s1integrand2(self, E, hw, kbT):
-        theta1, theta2 = (splev([E, E+hw], self.rethetaspl, ext=1) 
-                          + 1j*splev([E, E + hw], self.imthetaspl, ext=1))
+        theta1 = self.Usadel.solve(E)
+        theta2 = self.Usadel.solve(E + hw)
         return 1/hw * self.g1(theta1, theta2) * (1 - 2 * SCth.f(E + hw, kbT))
 
     def s2integrand1(self, E, hw, kbT):
-        theta1, theta2 = (splev([E, E+hw], self.rethetaspl, ext=1) 
-                          + 1j*splev([E, E + hw], self.imthetaspl, ext=1))
+        theta1 = self.Usadel.solve(E)
+        theta2 = self.Usadel.solve(E + hw)
         return 1/hw * self.g2(theta1, theta2) * (1 - 2 * SCth.f(E + hw, kbT))
 
     def s2integrand2(self, E, hw, kbT):
-        theta1, theta2 = (splev([E, E+hw], self.rethetaspl, ext=1) 
-                          + 1j*splev([E, E + hw], self.imthetaspl, ext=1))
+        theta1 = self.Usadel.solve(E)
+        theta2 = self.Usadel.solve(E + hw)
         return 1/hw * (self.g2(theta2, theta1) * (1 - 2 * SCth.f(E, kbT)))
 
     # NOTE: checked the integration bounds for consistency with Nam1967. 
-    # the g1 and g2 functions ensure that we can start at 0 (both when hw > 2 Egap and hw < 2 Egap)
-    # note that D is not the onset of DOS, but coherence peak energy. 
-    # So we take D instead of 2D as threshold (note: E=0 only becomes sharp when hw > D)
+    # added absolute value to g1 and g2, to converge to MB for alpha=0
     def _s1(self, kbT, hw):
         D = self.selfcons.solve(kbT)
-        self.update_thetaspl(hw, D)
-        spoints = (D - hw, D) # E points with sharp features
-        s1 = integrate.quad(self.s1integrand1, 0, spoints[0], args=(hw, kbT),
-                           points=spoints)[0]
-        s1 += integrate.quad(self.s1integrand1, spoints[0], spoints[1], args=(hw, kbT),
-                       points=spoints)[0]
-        s1 += integrate.quad(self.s1integrand1, spoints[1], 2*D, args=(hw, kbT),
-                       points=spoints)[0]
-        s1 += integrate.quad(self.s1integrand1, 2*D, np.inf, args=(hw, kbT))[0]
-        if hw > D:
-            s1 += integrate.quad(self.s1integrand2, -hw, 0, args=(hw, kbT),
-                                 points=(-hw, D-hw, -D, 0))[0]
+        self.Usadel.Delta = D
+        s1 = integrate.quad(self.s1integrand1, self.Usadel.Eg, np.inf, args=(hw, kbT))[0]
+        s1 += integrate.quad(self.s1integrand2, self.Usadel.Eg-hw, -self.Usadel.Eg, args=(hw, kbT))[0]
         return s1
         
     def s1(self, kbT, hw):
-        if isinstance(kbT, (int, float, complex)):
+        if isinstance(kbT, (int, float, complex)) and isinstance(hw, (int, float, complex)):
             return self._s1(kbT)
         else:
-            s1 = np.zeros(len(kbT))
             if isinstance(hw, (int, float, complex)):
                 hw = np.ones(len(kbT)) * hw
+                s1 = np.zeros(len(kbT))
+            elif isinstance(kbT, (int, float, complex)):
+                kbT = np.ones(len(hw)) * kbT
+                s1 = np.zeros(len(hw))
+            elif len(kbT) == len(hw):
+                s2 = np.zeros(len(kbT))
+            else:
+                raise ValueError('kbT and hw are arrays of different length')
             with Pool() as p:
                 for i, res in enumerate(p.imap(
                     lambda x: self._s1(*x), zip(kbT, hw))):
@@ -175,28 +159,34 @@ class Nam(object):
 
     def _s2(self, kbT, hw):
         D = self.selfcons.solve(kbT)
-        self.update_thetaspl(hw, D)
-        spoints = (D - hw, D) # E points with sharp features
-        s2 = integrate.quad(self.s2integrand1, -hw, spoints[0], args=(hw, kbT),
-                   points=spoints)[0]
-        s2 += integrate.quad(self.s2integrand1, spoints[0], spoints[1], args=(hw, kbT),
-                           points=spoints)[0]
-        s2 += integrate.quad(self.s2integrand1, spoints[1], 2*D, args=(hw, kbT),
-                           points=spoints)[0]
-        s2 += integrate.quad(self.s2integrand1, 2*D, np.inf, args=(hw, kbT))[0]
-        if hw > D:
-            s2 += integrate.quad(self.s2integrand2, 0, 2*D, args=(hw, kbT),
-                            points=(0, D))[0]
-            s2 += integrate.quad(self.s2integrand2, 2*D, np.inf, args=(hw, kbT))[0]
+        self.Usadel.Delta = D
+        # break-up integration into two parts at discontinuities
+        if hw > 2*self.Usadel.Eg:
+            s2 = integrate.quad(self.s2integrand1, 
+                                self.Usadel.Eg-hw, -self.Usadel.Eg, args=(hw, kbT))[0]
+            s2 += integrate.quad(self.s2integrand1, 
+                                 -self.Usadel.Eg, self.Usadel.Eg, args=(hw, kbT))[0]
+        else:
+            s2 = integrate.quad(self.s2integrand1, 
+                                self.Usadel.Eg-hw, self.Usadel.Eg, args=(hw, kbT))[0]
+        s2 += integrate.quad(self.s2integrand1, self.Usadel.Eg, np.inf, args=(hw, kbT))[0]
+        s2 += integrate.quad(self.s2integrand2, self.Usadel.Eg, np.inf, args=(hw, kbT))[0]
         return s2
         
     def s2(self, kbT, hw):
-        if isinstance(kbT, (int, float, complex)):
+        if isinstance(kbT, (int, float, complex)) and isinstance(hw, (int, float, complex)):
             return self._s2(kbT, hw)
         else:
-            s2 = np.zeros(len(kbT))
             if isinstance(hw, (int, float, complex)):
                 hw = np.ones(len(kbT)) * hw
+                s2 = np.zeros(len(kbT))
+            elif isinstance(kbT, (int, float, complex)):
+                kbT = np.ones(len(hw)) * kbT
+                s2 = np.zeros(len(hw))
+            elif len(kbT) == len(hw):
+                s2 = np.zeros(len(kbT))
+            else:
+                raise ValueError('kbT and hw are arrays of different length')
             with Pool() as p:
                 for i, res in enumerate(p.imap(
                     lambda x: self._s2(*x), zip(kbT, hw))):

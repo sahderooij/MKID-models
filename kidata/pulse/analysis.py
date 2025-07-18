@@ -2,7 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.mlab as mlab
 from scipy.signal import find_peaks
+from scipy.signal import peak_widths
 from scipy.stats import norm
+from scipy.stats import gaussian_kde
 
 import pandas as pd
 from IPython.display import clear_output
@@ -20,17 +22,27 @@ from kidata import io
 
 def calc_pulseavg_par(
     filelocation, KIDPrT=None, save_location=None,
-    pulse_len=2000, start=500, minmax_proms=None, 
-    coord='ampphase', phasemax=2, numpulses=100
+    pulse_len=2000, start=500, nrsgm=10, mawnd=10, minmax_proms=None, 
+    coord='ampphase', numpulses=100
 ):
     if KIDPrT is None:
         KIDPrT = np.unique(
             io.get_avlfileids(filelocation)[:, (0, 1, 4)].astype(int), 
             axis=0)
 
+    n_streams = np.array(
+        [
+            int(i.split("\\")[-1].split("_")[3][5:]) + 1
+            for i in glob.iglob(
+                filelocation +
+                (f"/KID{KIDPrT[0, 0]}_{KIDPrT[0, 1]}dBm"
+                 f"__TDvis*_TmK{KIDPrT[0, 2]}.bin"))
+        ]
+    ).max()
+
     if minmax_proms is None:
         minmax_proms = select_proms(
-            filelocation, KIDPrT, pulse_len, numpulses, coord, phasemax)
+            filelocation, KIDPrT, pulse_len, numpulses, coord, nrsgm, mawnd, n_streams)
         
     with Pool() as p:
         for dummy in tqdm(p.imap(lambda file: 
@@ -43,8 +55,8 @@ def calc_pulseavg_par(
 
 def calc_pulseavg(
     filelocation, KIDPrT=None, save_location=None,
-    pulse_len=2000, start=500, minmax_proms=None, 
-    coord='ampphase', phasemax=2, numpulses=100
+    pulse_len=2000, start=500, nrsgm=10, mawnd=10, minmax_proms=None, 
+    coord='ampphase', sfreq=1e6, numpulses=100
 ):
     """Script that runs a temp sweep of a certain data set and saves it.
     filelocation: the folder that contains .bin files.
@@ -73,19 +85,18 @@ def calc_pulseavg(
                  f"__TDvis*_TmK{KIDPrT[0, 2]}.bin"))
         ]
     ).max()
-
+    
     if save_location is None:
         parentfld = "\\".join(glob.glob(filelocation)[0].split("\\")[:-1])
-        fldnmlist = parentfld.split('\\')[-1].split(' ')
+        fldnmlist = parentfld.split('\\')[-1].split('_')
         wvl = np.array(fldnmlist)[[('nm' in i) for i in fldnmlist]]
         save_location = '\\'.join(parentfld.split('\\')[:-1]) + f'\\{wvl[0]}'
         if not os.path.exists(save_location):
             os.mkdir(save_location)
-        
 
     if minmax_proms is None:
         minmax_proms = select_proms(
-            filelocation, KIDPrT, pulse_len, numpulses, coord, phasemax)
+            filelocation, KIDPrT, pulse_len, numpulses, coord, nrsgm, mawnd, n_streams)
 
     KIDs = np.unique(KIDPrT[:, 0])
     for i in tnrange(len(KIDs), desc='KID', leave=False):
@@ -113,7 +124,7 @@ def calc_pulseavg(
                     data = io.get_bin(filelocation, KID, Pread, temp, n)
                     data_info = (f"{filelocation}/KID{KID}_{Pread}dBm"
                                  f"__TDvis{n}_TmK{temp}_info.dat")
-                    tres = calctres(data_info)
+                    tres = calctres(data_info, sfreq)
                     
                     if coord == 'ampphase':
                         amp, phase = to_ampphase(data)
@@ -123,22 +134,23 @@ def calc_pulseavg(
                         Qc = float(Qs[1].split('=')[1])
                         Q = float(Qs[0].split('=')[1])
                         amp, phase = to_RX(data, Q/(2*Qc))
-                    std = np.std(phase)
-                    min_dist = 1.5 * pulse_len
+                        
+                    min_dist = pulse_len
 
-                    peaks_cur, locs_cur, proms_cur, amount_cur = findpeaks(
+                    peaks_cur, locs_cur, proms_cur = find_sppeaks(
                         phase,
-                        3 * std,
+                        nrsgm,
+                        mawnd,
                         pulse_len,
                         start,
                         min_dist,
                         tres,
                         min_prom,
                         max_prom)
-                    if amount_cur > 0:
+                    if len(locs_cur) > 0:
                         cur_pulses_amp = get_amp(
                             amp, locs_cur, pulse_len, start, coord)
-                        for m in range(amount_cur):
+                        for m in range(len(locs_cur)):
                             all_pulses_phase.append(peaks_cur[m, :])
                             all_pulses_amp.append(cur_pulses_amp[m, :])
                             stream_num.append(n)
@@ -146,6 +158,10 @@ def calc_pulseavg(
                             (locations, (np.array(locs_cur))))
                         prominences = np.concatenate(
                             (prominences, np.array(proms_cur)))
+                    else:
+                        warnings.warn(
+                            f'No pulses found in KID{KID}, {temp} mK, {Pread} dBm, stream {n}'
+                        )
 
                 # now that we have all the pulses we generate an average pulse
                 # and save it, alongside some data of which pulses were used
@@ -204,15 +220,8 @@ def calc_pulseavg(
                 )
 
 
-def select_proms(filelocation, KIDPrT=None, pulse_len=2e3, numpulses=100, coord='ampphase', phasemax=2.5):
-    # Shows you nstream timestreams and a hist of the peaks and
-    # then asks you to select the prominences
-
-    if KIDPrT is None:
-        KIDPrT = io.get_avlbins(filelocation)
+def select_proms(filelocation, KIDPrT, pulse_len, numpulses, coord, nrsgm, mawnd, n_streams):
     minmax_proms = {}
-    maxp, minp = (0, 0)
-
     for KID in np.unique(KIDPrT[:, 0]):
         minmax_proms[KID] = {}
         for Pread in np.unique(KIDPrT[KIDPrT[:, 0] == KID, 1]):
@@ -224,7 +233,7 @@ def select_proms(filelocation, KIDPrT=None, pulse_len=2e3, numpulses=100, coord=
                 total_prominences = np.empty(0)
                 j = 0
                 totpulses = 0
-                while totpulses < numpulses:
+                while totpulses < numpulses and j < n_streams:
                     data = io.get_bin(filelocation, KID, Pread, temp, j)
                     data_info = (f"{filelocation}/KID{KID}_{Pread}dBm"
                                  f"__TDvis{j}_TmK{temp}_info.dat")
@@ -237,244 +246,164 @@ def select_proms(filelocation, KIDPrT=None, pulse_len=2e3, numpulses=100, coord=
                         Qc = float(Qs[1].split('=')[1])
                         Q = float(Qs[0].split('=')[1])
                         amp, phase = to_RX(data, Q/(2*Qc))
-                    noisestd_est = np.abs(np.diff(np.percentile(phase, [1e-7, 50]))[0])
-                    peaks, peakheight = find_peaks(
-                        phase, prominence=(2*noisestd_est, 
-                                           noisestd_est + phasemax))
-                    prominences = peakheight["prominences"]
-                    if len(peaks) >= 1:
-                        totpulses += len(peaks)
+                    locs, prominences = find_allpeaklocs(
+                        phase, nrsgm, mawnd, pulse_len)
+                    if len(locs) >= 1:
+                        totpulses += len(locs)
                         total_prominences = np.append(
                             total_prominences, prominences, 0)
                     else:
                         total_prominences = []
                         break
                     
-                mu, sigma = norm.fit(total_prominences)
 
                 fig, axs = plt.subplots(1, 2, figsize=(8, 3))
-                axs[0].plot(phase)
-                axs[0].plot(peaks, phase[peaks], 'r.')
-                axs[0].set_title(f"KID{KID}, {temp} mK, {Pread} dBm")
+                maphase = np.convolve(phase, np.ones(mawnd) / mawnd, mode="same")
+                tmax = 100*pulse_len
+                axs[0].plot(phase[:tmax])
+                axs[0].plot(maphase[:tmax])
+                axs[0].plot(locs[locs < tmax], 
+                            maphase[locs[locs < tmax]], 'r.')
+                axs[0].set_title(f"KID{KID}, {temp} mK, -{Pread} dBm")
+                axs[0].set_xlabel('Time')
+                axs[0].set_ylabel('Phase')
                 n, bins, patches = plt.hist(total_prominences, bins=30, density=True)
-                y = norm.pdf(bins, mu, sigma)
-                axs[1].plot(bins, y, 'r--', label=(f'Gaussian fit\n $\\mu$={mu:.2f}\n'
-                         +f'$\\sigma$={sigma:.3f}\n R={(mu/(sigma * 2*np.sqrt(2*np.log(2)))):.1f}'))
+                if len(total_prominences) > 0:
+                    kde = gaussian_kde(total_prominences)
+                    pdf = kde.pdf(bins)
+                    mu = bins[pdf.argmax()]
+                    fwhm = peak_widths(pdf, [pdf.argmax()])[0][0] * np.diff(bins)[0]
+                    sigma = fwhm / (2*np.sqrt(2*np.log(2)))
+                    axs[1].plot(bins, pdf, 'r--', 
+                                label=f'Gaussian kde\n R={(mu/fwhm):.1f}')
+                    lowbnd = mu - 2*sigma
+                    upbnd = mu + 2*sigma
+                    axs[1].fill_between(bins[(bins >= lowbnd) & (bins <= upbnd)], 0, 
+                    pdf[(bins >= lowbnd) & (bins <= upbnd)], 
+                    alpha=0.5, color='r')
+                else:
+                    lowbnd = np.nan
+                    upbnd = np.nan
+                axs[1].axvline(upbnd, color='r', linestyle='dashed')
+                axs[1].axvline(lowbnd, color='r', linestyle='dashed')
                 axs[1].set_title("Histogram of found peaks")
                 axs[1].set_xlabel('Prominence')
                 axs[1].legend()
                 plt.show()
-                minp = float(input(f"Lower bound (enter for {(mu - 2*sigma):.3f})") or mu - 2*sigma)
-                maxp = float(input(f"Upper bound (enter for {(mu + 2*sigma):.3f})") or mu + 2*sigma)
+                minp = float(input(f"Lower bound (enter for {lowbnd:.3f})") or lowbnd)
+                maxp = float(input(f"Upper bound (enter for {upbnd:.3f})") or upbnd)
                 minmax_proms[KID][Pread][temp] = (minp, maxp)
     clear_output()
     return minmax_proms
 
 
-def findpeaks(
+def find_allpeaklocs(data, nrsgm, mawnd, pulse_len):
+    # moving average with a windows of 
+    madata = np.convolve(data, np.ones(mawnd) / mawnd, mode="same")
+    # estimate the noise standard deviation by lower half
+    noisestd_est = np.abs(np.diff(np.percentile(madata, [16, 50]))[0])
+    # retrieve all the peaks in the timestream
+    locs, peakprops = find_peaks(madata, prominence=nrsgm*noisestd_est)
+    prominences = peakprops["prominences"]
+    return locs, prominences
+    
+    
+def find_sppeaks(
     data,
-    prom,
-    points,
+    nrsgm,
+    mawnd,
+    pulse_len,
     start,
     min_dist,
     tres,
     min_prom,
     max_prom,):
-    data = np.array(data)
+    '''Find the single photon peaks in the data'''
 
-    # retrieve all the peaks in the timestream
-    peaks, peakheight = find_peaks(data, prominence=prom)
-    prominences = peakheight["prominences"]
-    threshold = len(data) / (2 * points)
+    locs, prominences = find_allpeaklocs(data, nrsgm, mawnd, pulse_len)
 
-    # variable to ensure you don't include too many peaks so the dist checks removes everything
-    while len(peaks) > threshold:
-        prom += 0.05
-        mask = prominences > prom
-        peaks = peaks[mask]
-        prominences = prominences[mask]
+    if locs.size > 0:
+        # filter on distance to other peaks and data edges
+        locs, prominences = filter_distance(locs, prominences, min_dist, len(data))
+    
+        # filter on single photon peaks
+        locs, prominences = filter_prominence(locs, prominences, min_prom, max_prom)
 
-    # start tracking locations and amount of peaks
-    locations = np.copy(peaks)
+    # cut out the desired window (len: pulse_len, data points before the peakstart = start
+    peaks, locs = cut_peaks(data, locs, pulse_len, start, mawnd, tres)
 
-    # check distance
-    peaks, locations, prominences, amount = checkdist(
-        peaks, locations, prominences, min_dist
-    )
-
-    # cut out the desired window (len: points, data points before the peakstart = start
-    peaks, locations, prominences, amount = cut_peaks(
-        data, peaks, locations, prominences, amount, points, start, tres
-    )
-
-    # beforehand we also selected the little peaks, now we only want to look
-    # at the ones that are actually caused by photons and not other random hits
-
-    peaks, locations, prominences, amount = select_prominence(
-        peaks, locations, prominences, min_prom, max_prom
-    )
-    # here we check if we missed any little hits that weren't caught before
-
-    peaks, locations, prominences, amount = checkdoublepeak(
-        peaks, locations, prominences, amount
-    )
-
-    peaks, locations, prominences, amount = calc_offset(
-        peaks, amount, start, locations, data, prominences, tres
-    )
-    # Now we calculate the offset at the time of the peak by taking the average of the points before the peak (start)
+    # subtract the offset by the average of the start
+    peaks = subtr_offset(peaks, start, tres)
 
     # return the results
-    return peaks, locations, prominences, amount
+    return peaks, locs, prominences
 
 
 def get_amp(amp, locations, pulse_len, start, coord):
-    all_peaks = np.empty((0, pulse_len))
-
+    all_peaks = np.empty((len(locations), pulse_len))
     for i in range(len(locations)):
-
-        all_peaks = np.append(
-            all_peaks,
-            np.array(
-                [amp[(locations[i] - start): (locations[i] - start + pulse_len)]]
-            ),
-            0,
-        )
-        all_peaks[i, :] -= np.average(all_peaks[i, 0:(start - 50)])
-        if coord == 'ampphase':
-            all_peaks[i, :] += 1
+        all_peaks[i] = amp[int(locations[i] - start):int(locations[i] - start + pulse_len)]
     return all_peaks
 
 
-def checkdist(peaks, locations, proms, min_dist):
+def filter_distance(locs, proms, min_dist, data_len):
     # makes sure the pulses are separated by a distance min_dist
-    new_peaks = []
-    new_prominences = []
-    for i in range(0, len(peaks) - 1):
-        if (
-            np.abs(peaks[i] - peaks[i + 1]) > min_dist
-            and np.abs(peaks[i] - peaks[i - 1]) > min_dist
-        ):
-            new_peaks.append(peaks[i])
-            new_prominences.append(proms[i])
-    locations = np.copy(new_peaks)
-    return (new_peaks, locations, new_prominences, len(new_peaks))
+    dist = np.diff(locs)
+    distbefore = np.insert(dist, 0, locs[0])
+    distafter = np.append(dist, data_len - locs[-1])
+    mask = ((distbefore > min_dist)
+            & (distafter > min_dist))
+    return locs[mask], proms[mask]
 
-
-def cut_peaks(data, peaks, locations, proms, amount, points, start, tres):
-    # defines the lenght of the pulse (points) and the amount of noise beforehand (start)
+def cut_peaks(data, locs, pulse_len, start, mawnd, tres):
+    # defines the lenght of the pulse (pulse_len) and the amount of noise beforehand (start)
     # also makes sure the peaks are overlapped correctly by using a difference check with risetime
-    all_peaks = np.empty((0, points))
-    true_locations = []
-    deleted = []
+    all_peaks = np.zeros((len(locs), pulse_len))
+    true_locations = np.zeros(len(locs))
+    
+    for i in range(len(locs)):
+        startwnd = data[locs[i] - int(10*tres) - mawnd:locs[i] + int(10*tres)]
+        difference = np.roll(startwnd, -int(np.ceil(tres))) - startwnd
+        begin = np.argmax(difference[:-int(np.ceil(tres))])
+        actual_location = locs[i] - int(10*tres) - mawnd + begin + int(np.ceil(tres))
+        all_peaks[i, :] = data[(actual_location - start):(
+            actual_location - start + pulse_len)]
+        true_locations[i] = actual_location
 
-    for i in range(len(peaks)):
-        if (start * 2) < peaks[i] < (len(data) - (points) - 100):
-            check = np.array(data[peaks[i] - 80: peaks[i] + 10])
-            difference = diff(check, int(np.ceil(tres)))
-            begin = np.argmax(difference)
-            actual_location = peaks[i] - 80 + begin + int(np.ceil(tres))
-            all_peaks = np.append(
-                all_peaks,
-                np.array(
-                    [
-                        data[
-                            (actual_location - start): (
-                                actual_location - start + points
-                            )
-                        ]
-                    ]
-                ),
-                0,
-            )
-            true_locations.append(actual_location)
-        else:
-            deleted.append(i)
-
-    proms = np.delete(proms, deleted)
-    amount_peaks = len(proms)
-
-    return all_peaks, true_locations, proms, amount_peaks
+    return all_peaks, true_locations
 
 
-def calc_offset(peaks, amount, start, locations, data, prominences, tres):
-    # create array to store offsets
-    offsets = np.zeros(shape=amount)
-    # calc offsets
-    for i in range(amount):
-        used_range = peaks[i, 0:start - int(5*tres)]
-        offsets[i] = np.mean(used_range)
-        peaks[i, :] -= offsets[i]
-    amount = len(locations)
-    return peaks, locations, prominences, amount
+def subtr_offset(peaks, start, tres):
+    for i in range(len(peaks[:, 0])):
+        peaks[i, :] -= np.mean(peaks[i, 0:start - int(10*tres)])
+    return peaks
 
 
-def select_prominence(peaks, locations, prominences, min_prom, max_prom):
+def filter_prominence(locations, prominences, min_prom, max_prom):
     # selects only the desired peaks after the distance check has been done
-    prominences = np.array(prominences)
-    mask1 = min_prom < prominences
-    mask2 = prominences < max_prom
-    mask = np.logical_and(mask1, mask2)
+    mask = (prominences > min_prom) & (prominences < max_prom)
     if sum(mask) > 0:
-        peaks = peaks[mask, :]
-        prominences = np.array(prominences)[mask]
-        locations = np.array(locations)[mask]
-        amount = len(locations)
-
-        return peaks, locations, prominences, amount
+        prominences = prominences[mask]
+        locations = locations[mask]
+        return locations, prominences
     else:
-        return [], [], [], 0
+        return [], []
+        
 
-
-def diff(peak, num_dif):
-    diff = peak[num_dif:] - peak[:-num_dif]
-    return diff
-
-
-def movingaverage(peak, window):
-    avg = np.convolve(peak, np.ones(window) / window, mode="same")
-    return avg
-
-
-def checkdoublepeak(peaks, locations, prominences, amount):
-    deleted = []
-    for i in range(amount):
-        peak = peaks[i, :]
-        avg = movingaverage(peak, 10)
-        std = np.std(avg[0:400])
-        mul = 0.1
-        check, check1 = find_peaks(
-            avg, prominence=mul * prominences[i], distance=30)
-        cur_prom = check1["prominences"]
-        left_bases = check1["left_bases"]
-        while len(check) > 5:
-            mul += 0.05
-
-            mask = cur_prom > mul * prominences[i]
-            cur_prom = cur_prom[mask]
-            check = check[mask]
-            left_bases = left_bases[mask]
-        if len(check) > 1:
-            deleted.append(i)
-
-    peaks = np.delete(peaks, deleted, 0)
-    proms = np.delete(prominences, deleted)
-    locations = np.delete(locations, deleted)
-    amount = len(locations)
-    return peaks, locations, proms, amount
-
-
-def calctres(info_loc):
+def calctres(info_loc, sfreq):
     datContent = [i.strip().split() for i in open(info_loc).readlines()]
     Omega_0 = 2 * np.pi * float(datContent[2][4][1:]) * 1e9
     Q = float(datContent[3][0][2:-1])
-    tres = 2 * Q / Omega_0 * 1e6
+    tres = 2 * Q / Omega_0 * sfreq # in units of 1 / sample rate
     return tres
 
 
-def view_pulses(Chipnum, KID, Pread, wvl, T, coord='ampphase', pulse_len=500, start=100,
-                logscale=True, movavg=False, wnd=9, suboff=False, ymin=1e-3):
-    strms, locs, proms = io.get_pulseavginfo(Chipnum, KID, Pread, wvl, T, coord=coord)
+def view_pulses(binloc, avgloc, KID, Pread, T, coord='ampphase', pulse_len=500, start=100,
+                logscale=True, movavg=False, wnd=9, suboff=False, ymin=1e-3, sfreq=1e6):
+    
+    strms, locs, proms = np.genfromtxt(avgloc + f'/KID{KID}_{Pread}dBm__TmK{T}_avgpulse_{coord}_info.csv',
+        delimiter=',', skip_header=1, unpack=True)
+    
     plt.ion()
 
     def show_pulse(pulse):
@@ -482,13 +411,10 @@ def view_pulses(Chipnum, KID, Pread, wvl, T, coord='ampphase', pulse_len=500, st
         strm = strms[pulse]
         loc = locs[pulse]
 
-        filelocation = io.get_datafld() + f'{Chipnum}\\Pulse\\{wvl}nm\\TD_2D'
-
-        data_info = (f"{filelocation}/KID{KID}_{Pread}dBm"
+        data_info = (f"{binloc}/KID{KID}_{Pread}dBm"
                      f"__TDvis{strm}_TmK{T}_info.dat")
 
-        data = io.get_bin(filelocation,
-                          KID, Pread, T, strm)
+        data = io.get_bin(binloc, KID, Pread, T, strm)
         if coord == 'ampphase':
             amp, phase = to_ampphase(data)
             phpulse = phase[int(loc-start):int(loc+pulse_len-start)]
@@ -505,8 +431,8 @@ def view_pulses(Chipnum, KID, Pread, wvl, T, coord='ampphase', pulse_len=500, st
             raise ValueError('coord must be ampphase or RX')
         t = np.arange(len(phpulse)) - start
         if suboff:
-            phpulse -= np.mean(phpulse[0:start - 5*calctres(data_info)])
-            amppulse -= np.mean(amppulse[0:start - 5*calctres(data_info)])
+            phpulse -= np.mean(phpulse[0:start - 5*calctres(data_info, sfreq)])
+            amppulse -= np.mean(amppulse[0:start - 5*calctres(data_info, sfreq)])
         if movavg:
             phpulse = savgol_filter(phpulse, wnd, 0)
             amppulse = savgol_filter(amppulse, wnd, 0)

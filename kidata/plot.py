@@ -139,7 +139,7 @@ def Qif0(
     if color == "Pread":
         cmap = matplotlib.cm.get_cmap("plasma")
         norm = matplotlib.colors.Normalize(-1.05 * Preadar.max(), -0.95 * Preadar.min())
-        clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap))
+        clb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axs[-1])
         clb.ax.set_title(r"$P_{read}$ (dBm)")
     elif color == "Pint":
         Pint = np.array(io.get_Pintdict(Chipnum)[KIDnum])
