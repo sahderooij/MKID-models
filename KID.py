@@ -80,7 +80,7 @@ class KID(object):
     @property
     def Qi_0(self):
         hwread = self.hwread
-        s_0 = kidcalc.cinduct(hwread, self.D_0, self.kbT)
+        s_0 = kidcalc.cinduct(hwread, self.kbT, self.SC)
         return kidcalc.Qi(s_0[0], s_0[1], self.ak, self.kbT, self.D_0,
                          SC.Sheet(self.SC, self.d))
 
@@ -94,8 +94,7 @@ class KID(object):
 
     @property
     def s20(self):
-        D_0 = kidcalc.D(self.kbT0, self.SC)
-        return kidcalc.cinduct(self.hw0, D_0, self.kbT0)[1]
+        return kidcalc.cinduct(self.hw0, self.kbT0, self.SC)[1]
 
     def fit_epb(self, peakdata, wvl, *args, var="phase"):
         """Sets the pair-breaking efficiency to match the maximum of 
@@ -182,7 +181,7 @@ class KID(object):
         kbTeff = kidcalc.kbTeff(Nqp / self.V, self.SC)
         D = kidcalc.D(kbTeff, self.SC)
 
-        s1, s2 = kidcalc.cinduct(hwread + dhw, D, kbTeff)
+        s1, s2 = kidcalc.cinduct(hwread + dhw, kbTeff, self.SC)
 
         Qi = kidcalc.Qi(s1, s2, self.ak, kbTeff, D,
                         SC.Sheet(self.SC, self.d))
@@ -194,7 +193,7 @@ class KID(object):
         # Calculate S21
         S21 = self.calc_S21(Nqp, hwread, s20, dhw)
         # Define circle at this temperature:
-        s_0 = kidcalc.cinduct(hwread, D_0, self.kbT)
+        s_0 = kidcalc.cinduct(hwread, self.kbT, self.SC)
         Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak, self.kbT, D_0,
                           SC.Sheet(self.SC, self.d))
         S21min = self.Qc / (self.Qc + Qi_0)  # Q/Qi
@@ -205,7 +204,7 @@ class KID(object):
         return S21, dA, theta
 
     def calc_linresp(self, Nqp, hwread, D_0):
-        s_0 = kidcalc.cinduct(hwread, D_0, self.kbT)
+        s_0 = kidcalc.cinduct(hwread, self.kbT, self.SC)
         Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak, self.kbT, D_0,
                           SC.Sheet(self.SC, self.d))
         Q = Qi_0 * self.Qc / (Qi_0 + self.Qc)
@@ -213,7 +212,7 @@ class KID(object):
 
         kbTeff = kidcalc.kbTeff(Nqp / self.V, self.SC)
         D = kidcalc.D(kbTeff, self.SC)
-        s1, s2 = kidcalc.cinduct(hwread, D, kbTeff)
+        s1, s2 = kidcalc.cinduct(hwread, kbTeff, self.SC)
 
         lindA = self.ak * beta * Q * (s1 - s_0[0]) / s_0[1]
         lintheta = -self.ak * beta * Q * (s2 - s_0[1]) / s_0[1]
@@ -241,12 +240,13 @@ class KID(object):
         ts = t[mask]
 
         dAtheta = np.zeros((2, len(Nqpts)))
-        S21 = np.zeros((len(Nqpts)), dtype="complex")
+        # S21 = np.zeros((len(Nqpts)), dtype="complex")
 
-        for i in range(len(Nqpts)):
-            S21[i], dAtheta[0, i], dAtheta[1, i] = self.calc_resp(
-                Nqpts[i], hwread, s20, D_0
-            )
+        # for i in range(len(Nqpts)):
+        #     S21[i], dAtheta[0, i], dAtheta[1, i] = self.calc_resp(
+        #         Nqpts[i], hwread, s20, D_0
+        #     )
+        S21, dA, theta = self.calc_resp(Nqpts, hwread, s20, D_0)
         return ts, S21, dAtheta
 
     # Noise calculation functions
@@ -301,7 +301,7 @@ class KID(object):
         D_0 = self.D_0
         s20 = self.s20
 
-        s_0 = kidcalc.cinduct(hwread, D_0, self.kbT)
+        s_0 = kidcalc.cinduct(hwread, self.kbT, self.SC)
         Qi_0 = kidcalc.Qi(s_0[0], s_0[1], self.ak, self.kbT, D_0,
                           SC.Sheet(self.SC, self.d))
         Q = Qi_0 * self.Qc / (Qi_0 + self.Qc)
@@ -312,9 +312,9 @@ class KID(object):
         if stop is None:
             stop = self.hw0 / Q * 2
 
-        for dhw in np.linspace(start, stop, points):
-            S21_0 = self.calc_S21(self.Nqp_0, hwread, s20, dhw=dhw)
-            plt.plot(np.real(S21_0), np.imag(S21_0), "r.")
+        dhw = np.linspace(start, stop, points)
+        S21_0 = self.calc_S21(self.Nqp_0, hwread, s20, dhw=dhw)
+        plt.plot(np.real(S21_0), np.imag(S21_0), "r.")
         plt.plot(xc, 0, "kx")
         plt.plot(S21min, 0, "gx")
 
@@ -324,6 +324,7 @@ class KID(object):
         ts, S21, dAtheta = self.calc_respt(hwrad, tStop=tStop, tInc=tInc, points=points)
 
         plt.plot(np.real(S21), np.imag(S21), ".b")
+        plt.gca().set_aspect('equal')        
 
     def plot_dAthetaresp(self, hwrad, tStop=None, tInc=None, points=50, plot="both"):
 
@@ -495,7 +496,7 @@ class S21KID(KID):
         kbTeff = kidcalc.kbTeff(Nqp / self.V, self.SC)
         D = kidcalc.D(kbTeff, self.SC)
 
-        s1, s2 = kidcalc.cinduct(hwread + dhw, D, kbTeff)
+        s1, s2 = kidcalc.cinduct(hwread + dhw, kbTeff, self.SC)
 
         Qi = interpolate.splev(kbTeff, self.Qispl)
 

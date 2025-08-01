@@ -148,9 +148,11 @@ def kbTeff(nqp_, SC):
     Ddata = SC.Ddata
     if Ddata is not None:
         kbTspl = interpolate.splrep(Ddata[2, :], Ddata[0, :], s=0, k=1)
-        return interpolate.splev(nqp_, kbTspl)
+        if isinstance(nqp_, (float, int, complex)):
+            return float(interpolate.splev(nqp_, kbTspl))
+        else:
+            return interpolate.splev(nqp_, kbTspl)
     else:
-
         def minfunc(kbT, nqp_, SC):
             Dt = D(kbT, SC)
             return np.abs(nqp(kbT, Dt, SC) - nqp_)
@@ -212,7 +214,7 @@ def S21(Qi, Qc, hwread, dhw, hwres):
     return (Q / Qi + 2j * Q * dhw_act / hwres) / (1 + 2j * Q * dhw_act / hwres)
 
 
-def hwread(hw0, kbT0, ak, kbT, SCvol):
+def hwread(hw0, kbT0, ak, kbT, D_, SCvol):
     """Calculates at which frequency, one probes at resonance. 
     This must be done iteratively, as the resonance frequency is 
     dependent on the complex conductivity, which in turn depends on the
@@ -221,7 +223,7 @@ def hwread(hw0, kbT0, ak, kbT, SCvol):
 
     def minfuc(hw, hw0, s20, ak, kbT, SCvol):
         s1, s2 = cinduct(hw, kbT, SCvol.SC)
-        return np.abs(hwres(s2, hw0, s20, ak, kbT, SCvol) - hw)
+        return np.abs(hwres(s2, hw0, s20, ak, kbT, D_, SCvol) - hw)
 
     res = minisc(
         minfuc,

@@ -3,5 +3,5 @@
 *.ipynb_checkpoints*
 */.ipynb_checkpoints/*
 *__pycache__/*
-*.ipynb
 *.zip
+plot_data.ipynb
